@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>互動簽名牆｜顯示牆</title>
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@7.4.2/dist/pixi.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:radial-gradient(circle at 50% 45%,#162033 0,#0f172a 50%,#070b13 100%);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft JhengHei",sans-serif}#stage{width:100%;height:100%}.badge{position:fixed;left:22px;top:18px;color:#e5e7eb;background:#111827aa;border:1px solid #ffffff18;border-radius:999px;padding:8px 13px;font-size:13px;backdrop-filter:blur(8px)}
+</style>
+</head>
+<body>
+<div id="stage"></div><div class="badge">互動簽名牆 · LIVE</div>
+<script>
+const LIFE=5*60*1000,COLORS=[0xffffff,0x93c5fd,0xa7f3d0,0xfde68a,0xf9a8d4,0xc4b5fd];
+const app=new PIXI.Application({resizeTo:window,backgroundAlpha:0,antialias:true,resolution:Math.min(devicePixelRatio||1,2),autoDensity:true});
+document.querySelector('#stage').appendChild(app.view);
+const layer=new PIXI.Container();app.stage.addChild(layer);
+const socket=io({query:{type:'wall'}});socket.on('new-signature',addSignature);
+function bounds(strokes){let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;for(const s of strokes)for(const p of s){minX=Math.min(minX,p.x);minY=Math.min(minY,p.y);maxX=Math.max(maxX,p.x);maxY=Math.max(maxY,p.y)}return{minX,minY,maxX,maxY,w:Math.max(1,maxX-minX),h:Math.max(1,maxY-minY)}}
+function addSignature(data){if(!data||!Array.isArray(data.strokes)||!data.strokes.length)return;const b=bounds(data.strokes),g=new PIXI.Graphics(),color=COLORS[Math.floor(Math.random()*COLORS.length)];g.lineStyle(4,color,1);for(const s of data.strokes){if(s.length<2)continue;g.moveTo(s[0].x-b.minX,s[0].y-b.minY);for(let i=1;i<s.length;i++)g.lineTo(s[i].x-b.minX,s[i].y-b.minY)}const c=new PIXI.Container();c.addChild(g);c.pivot.set(b.w/2,b.h/2);const targetScale=Math.min(1.15,Math.max(.42,250/Math.max(b.w,b.h)));c.scale.set(targetScale);const margin=110,targetX=margin+Math.random()*Math.max(1,app.screen.width-margin*2),targetY=margin+Math.random()*Math.max(1,app.screen.height-margin*2);const edge=Math.floor(Math.random()*4);if(edge===0){c.x=targetX;c.y=-120}else if(edge===1){c.x=app.screen.width+120;c.y=targetY}else if(edge===2){c.x=targetX;c.y=app.screen.height+120}else{c.x=-120;c.y=targetY}c.alpha=0;c.rotation=(Math.random()-.5)*.5;layer.addChild(c);gsap.to(c,{x:targetX,y:targetY,alpha:1,rotation:(Math.random()-.5)*.08,duration:1.15,ease:'power3.out',onComplete:()=>float(c,targetX,targetY)});setTimeout(()=>remove(c),LIFE)}
+function float(c,x,y){c._base={x,y,px:Math.random()*6.28,py:Math.random()*6.28,pr:Math.random()*6.28,sx:.25+Math.random()*.3,sy:.25+Math.random()*.3,sr:.12+Math.random()*.18,ax:3+Math.random()*6,ay:2+Math.random()*5,ar:.015+Math.random()*.025}}
+function remove(c){if(!c.parent)return;gsap.to(c,{alpha:0,duration:.8,ease:'power2.in',onComplete:()=>{c.parent?.removeChild(c);c.destroy({children:true})}})}
+app.ticker.add(()=>{const t=performance.now()/1000;for(const c of layer.children){if(!c._base)continue;const d=c._base;c.x=d.x+Math.sin(t*d.sx+d.px)*d.ax;c.y=d.y+Math.sin(t*d.sy+d.py)*d.ay;c.rotation=Math.sin(t*d.sr+d.pr)*d.ar}});
+</script>
+</body>
+</html>
