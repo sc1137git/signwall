@@ -7,59 +7,31 @@
 <style>
 *{box-sizing:border-box}
 html,body{margin:0;width:100%;height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft JhengHei",sans-serif;background:#0b1220;color:#fff}
-button{font:inherit}
-.top{height:58px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;border-bottom:1px solid #ffffff16;background:#0f172a;color:#fff}
-.top b{font-size:20px}.tag{font-size:12px;color:#cbd5e1;background:#ffffff10;padding:6px 10px;border-radius:999px}
-.layout{height:calc(100vh - 58px);display:grid;grid-template-columns:44% 56%}
-.devices{background:#fff;color:#111827;padding:18px 16px 14px;display:flex;flex-direction:column;min-width:0}
-.intro{text-align:center;margin-bottom:10px}.intro h2{margin:0 0 4px;font-size:20px}.intro p{margin:0;color:#6b7280;font-size:13px}
-.phones{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;gap:18px}
-.phone{height:min(70vh,610px);aspect-ratio:9/19.5;min-height:390px;background:#111827;border-radius:36px;padding:9px;box-shadow:0 18px 42px #00000025;position:relative}
-.phone:before{content:"";position:absolute;z-index:8;top:13px;left:50%;transform:translateX(-50%);width:72px;height:18px;border-radius:999px;background:#0b1020;pointer-events:none}
-.screen{position:relative;width:100%;height:100%;overflow:hidden;border-radius:28px;background:#f8fafc;padding:36px 10px 58px}
-.write-area{position:relative;width:100%;height:100%;background:#fff;border:2px dashed #cbd5e1;border-radius:15px;overflow:hidden;box-shadow:inset 0 0 0 1px #f1f5f9}
-.write-area:before{content:"可書寫範圍";position:absolute;z-index:3;left:10px;top:8px;color:#94a3b8;font-size:10px;font-weight:700;background:#ffffffdd;padding:2px 5px;border-radius:5px;pointer-events:none}
-.write-area canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;background:transparent}
-.device-label{position:absolute;z-index:5;top:36px;right:14px;color:#94a3b8;font-size:10px;font-weight:700;pointer-events:none}
-.phone-actions{position:absolute;z-index:7;left:10px;right:10px;bottom:10px;display:flex;gap:7px}
-.phone-actions button{flex:1;border:0;border-radius:10px;padding:9px 4px;font-size:12px;font-weight:800}.clear{background:#e5e7eb;color:#374151}.send{background:#2563eb;color:#fff}.send:disabled{opacity:.35}
-.wall{position:relative;overflow:hidden;background:radial-gradient(circle at 50% 45%,#1e293b,#0f172a 58%,#070b13)}#wall{position:absolute;inset:0;width:100%;height:100%;display:block}
-.hint{position:absolute;left:18px;top:16px;padding:7px 11px;border-radius:999px;background:#0006;color:#e2e8f0;font-size:12px}.empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;color:#64748b;font-size:15px}.empty.hide{display:none}.counter{position:absolute;right:18px;bottom:16px;color:#94a3b8;font-size:12px;background:#0004;padding:6px 9px;border-radius:999px}
-@media(max-width:1000px){.layout{grid-template-columns:48% 52%}.phones{gap:10px}.phone{height:min(65vh,560px)}}
-@media(max-width:760px){html,body{overflow:auto}.layout{height:auto;grid-template-columns:1fr}.devices{min-height:650px}.wall{height:48vh}.tag{display:none}.phone{height:500px}.phones{gap:8px}}
+button{font:inherit}.top{height:58px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;border-bottom:1px solid #ffffff16;background:#0f172a;color:#fff}.top b{font-size:20px}.tag{font-size:12px;color:#cbd5e1;background:#ffffff10;padding:6px 10px;border-radius:999px}
+.layout{height:calc(100vh - 58px);display:grid;grid-template-columns:46% 54%}.devices{background:#fff;color:#111827;padding:14px 16px 16px;display:flex;flex-direction:column;min-width:0}.intro{text-align:center;margin-bottom:8px}.intro h2{margin:0 0 3px;font-size:19px}.intro p{margin:0;color:#6b7280;font-size:12px}.phones{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}.phone{width:min(100%,590px);aspect-ratio:19.5/9;background:#111827;border-radius:30px;padding:9px;box-shadow:0 14px 34px #00000022;position:relative}.phone:before{content:"";position:absolute;z-index:9;left:13px;top:50%;transform:translateY(-50%);width:18px;height:70px;border-radius:999px;background:#0b1020;pointer-events:none}.screen{position:relative;width:100%;height:100%;overflow:hidden;border-radius:22px;background:#f8fafc;padding:10px 10px 10px 34px;display:grid;grid-template-columns:minmax(0,1fr) 78px;gap:9px}.write-area{position:relative;width:100%;height:100%;background:#fff;border:2px dashed #94a3b8;border-radius:13px;overflow:hidden;box-shadow:inset 0 0 0 1px #e2e8f0}.write-area:before{content:"可書寫範圍";position:absolute;z-index:3;left:10px;top:8px;color:#64748b;font-size:10px;font-weight:800;background:#fffffff0;padding:2px 6px;border-radius:5px;pointer-events:none}.write-area canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;background:transparent}.side{display:flex;flex-direction:column;gap:8px;align-items:stretch;justify-content:center}.device-label{text-align:center;color:#94a3b8;font-size:11px;font-weight:800}.side button{border:0;border-radius:10px;padding:10px 4px;font-size:12px;font-weight:800}.clear{background:#e5e7eb;color:#374151}.send{background:#2563eb;color:#fff}.send:disabled{opacity:.35}
+.wall{position:relative;overflow:hidden;background:radial-gradient(circle at 50% 45%,#1e293b,#0f172a 58%,#070b13)}#wall{position:absolute;inset:0;width:100%;height:100%;display:block}.hint{position:absolute;left:18px;top:16px;padding:7px 11px;border-radius:999px;background:#0006;color:#e2e8f0;font-size:12px}.empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;color:#64748b;font-size:15px}.empty.hide{display:none}.counter{position:absolute;right:18px;bottom:16px;color:#94a3b8;font-size:12px;background:#0004;padding:6px 9px;border-radius:999px}
+@media(max-width:1000px){.layout{grid-template-columns:50% 50%}.phone{width:min(100%,520px)}.phones{gap:10px}}
+@media(max-width:760px){html,body{overflow:auto}.layout{height:auto;grid-template-columns:1fr}.devices{min-height:620px}.wall{height:48vh}.tag{display:none}.phone{width:min(100%,560px)}}
 </style>
 </head>
 <body>
 <div class="top"><b>✍️ SignWall 互動簽名牆</b><span class="tag">GitHub Pages · 雙裝置互動 Demo</span></div>
 <div class="layout">
-  <section class="devices">
-    <div class="intro"><h2>兩台裝置一起簽名</h2><p>灰色虛線框就是實際可書寫範圍；兩台可以各自送到同一面牆。</p></div>
-    <div class="phones">
-      <div class="phone"><div class="screen"><div class="device-label">A</div><div class="write-area"><canvas id="padA"></canvas></div><div class="phone-actions"><button class="clear" data-clear="A">清除</button><button class="send" data-send="A" disabled>送出</button></div></div></div>
-      <div class="phone"><div class="screen"><div class="device-label">B</div><div class="write-area"><canvas id="padB"></canvas></div><div class="phone-actions"><button class="clear" data-clear="B">清除</button><button class="send" data-send="B" disabled>送出</button></div></div></div>
-    </div>
-  </section>
-  <section class="wall"><canvas id="wall"></canvas><div class="hint">即時顯示牆 Demo</div><div id="empty" class="empty">從左邊任一台手機送出第一個簽名</div><div id="counter" class="counter">0 個簽名</div></section>
+<section class="devices">
+<div class="intro"><h2>兩台裝置一起簽名</h2><p>兩台橫向裝置，上下排列；灰色虛線內就是完整可書寫範圍。</p></div>
+<div class="phones">
+<div class="phone"><div class="screen"><div class="write-area"><canvas id="padA"></canvas></div><div class="side"><div class="device-label">裝置 A</div><button class="clear" data-clear="A">清除</button><button class="send" data-send="A" disabled>送出</button></div></div></div>
+<div class="phone"><div class="screen"><div class="write-area"><canvas id="padB"></canvas></div><div class="side"><div class="device-label">裝置 B</div><button class="clear" data-clear="B">清除</button><button class="send" data-send="B" disabled>送出</button></div></div></div>
+</div>
+</section>
+<section class="wall"><canvas id="wall"></canvas><div class="hint">即時顯示牆 Demo</div><div id="empty" class="empty">從左邊任一台裝置送出第一個簽名</div><div id="counter" class="counter">0 個簽名</div></section>
 </div>
 <script>
-const PAD_W=360,PAD_H=650;
+const PAD_W=650,PAD_H=360;
 const wall=document.querySelector('#wall'),wc=wall.getContext('2d'),empty=document.querySelector('#empty'),counter=document.querySelector('#counter');
 const items=[],COLORS=['#ffffff','#93c5fd','#a7f3d0','#fde68a','#f9a8d4','#c4b5fd'];
-
 function drawStroke(ctx,s){if(s.length<2)return;ctx.beginPath();ctx.moveTo(s[0].x,s[0].y);for(let i=1;i<s.length;i++)ctx.lineTo(s[i].x,s[i].y);ctx.stroke()}
-function makePad(id){
-  const canvas=document.querySelector('#pad'+id),ctx=canvas.getContext('2d'),send=document.querySelector(`[data-send="${id}"]`),clear=document.querySelector(`[data-clear="${id}"]`);
-  const state={id,canvas,ctx,send,strokes:[],current:[],drawing:false};
-  function resize(){const r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(1,Math.round(r.width*d));canvas.height=Math.max(1,Math.round(r.height*d));ctx.setTransform(canvas.width/PAD_W,0,0,canvas.height/PAD_H,0,0);ctx.lineWidth=3.2;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#111827';redraw()}
-  function point(e){const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*PAD_W/r.width,y:(e.clientY-r.top)*PAD_H/r.height}}
-  function redraw(){ctx.clearRect(0,0,PAD_W,PAD_H);state.strokes.forEach(s=>drawStroke(ctx,s));drawStroke(ctx,state.current)}
-  canvas.addEventListener('pointerdown',e=>{e.preventDefault();state.drawing=true;state.current=[point(e)];send.disabled=false;try{canvas.setPointerCapture(e.pointerId)}catch{}});
-  canvas.addEventListener('pointermove',e=>{if(!state.drawing)return;e.preventDefault();const p=point(e);state.current.push(p);if(state.current.length===2){ctx.beginPath();ctx.moveTo(state.current[0].x,state.current[0].y)}ctx.lineTo(p.x,p.y);ctx.stroke()});
-  const up=e=>{if(!state.drawing)return;e.preventDefault();state.drawing=false;if(state.current.length)state.strokes.push(state.current);state.current=[]};
-  canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
-  clear.onclick=()=>{state.strokes=[];state.current=[];ctx.clearRect(0,0,PAD_W,PAD_H);send.disabled=true};
-  send.onclick=()=>sendToWall(state);state.resize=resize;return state;
-}
+function makePad(id){const canvas=document.querySelector('#pad'+id),ctx=canvas.getContext('2d'),send=document.querySelector(`[data-send="${id}"]`),clear=document.querySelector(`[data-clear="${id}"]`);const state={id,canvas,ctx,send,strokes:[],current:[],drawing:false};function resize(){const r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(1,Math.round(r.width*d));canvas.height=Math.max(1,Math.round(r.height*d));ctx.setTransform(canvas.width/PAD_W,0,0,canvas.height/PAD_H,0,0);ctx.lineWidth=3.2;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#111827';redraw()}function point(e){const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*PAD_W/r.width,y:(e.clientY-r.top)*PAD_H/r.height}}function redraw(){ctx.clearRect(0,0,PAD_W,PAD_H);state.strokes.forEach(s=>drawStroke(ctx,s));drawStroke(ctx,state.current)}canvas.addEventListener('pointerdown',e=>{e.preventDefault();state.drawing=true;state.current=[point(e)];send.disabled=false;try{canvas.setPointerCapture(e.pointerId)}catch{}});canvas.addEventListener('pointermove',e=>{if(!state.drawing)return;e.preventDefault();const p=point(e);state.current.push(p);if(state.current.length===2){ctx.beginPath();ctx.moveTo(state.current[0].x,state.current[0].y)}ctx.lineTo(p.x,p.y);ctx.stroke()});const up=e=>{if(!state.drawing)return;e.preventDefault();state.drawing=false;if(state.current.length)state.strokes.push(state.current);state.current=[]};canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);clear.onclick=()=>{state.strokes=[];state.current=[];ctx.clearRect(0,0,PAD_W,PAD_H);send.disabled=true};send.onclick=()=>sendToWall(state);state.resize=resize;return state}
 const pads=[makePad('A'),makePad('B')];
 function bounds(ss){let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;for(const s of ss)for(const p of s){minX=Math.min(minX,p.x);minY=Math.min(minY,p.y);maxX=Math.max(maxX,p.x);maxY=Math.max(maxY,p.y)}return{minX,minY,w:Math.max(1,maxX-minX),h:Math.max(1,maxY-minY)}}
 function target(r){const m=95;let best={x:r.width/2,y:r.height/2},score=-1;for(let i=0;i<18;i++){const x=m+Math.random()*Math.max(1,r.width-m*2),y=m+Math.random()*Math.max(1,r.height-m*2);let near=99999;for(const it of items)near=Math.min(near,Math.hypot(x-it.tx,y-it.ty));if(near>score){score=near;best={x,y}}}return best}
