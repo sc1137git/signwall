@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>互動簽名牆 - 投影</title>
+<script src="/signwall/socket.io/socket.io.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pixi.js@7/dist/pixi.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gsap@3/dist/gsap.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #0a0a1a; font-family: -apple-system, "Helvetica Neue", sans-serif; }
+#wall { width: 100%; height: 100%; }
+#ui { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; z-index: 10; }
+#counter { color: rgba(255,255,255,0.5); font-size: 16px; letter-spacing: 1px; text-shadow: 0 0 20px rgba(0,0,0,0.8); }
+#hint { color: rgba(255,255,255,0.2); font-size: 13px; margin-top: 6px; letter-spacing: 2px; }
+</style>
+</head>
+<body>
+<div id="wall"></div>
+<div id="ui">
+  <div id="counter">已收到 0 筆簽名</div>
+  <div id="hint">請拿起 iPad 簽名</div>
+</div>
+<script>
+// === 設定 ===
+const SERVER_URL = window.location.origin;
+const MAX_SIG_W = 220;
+const MAX_SIG_H = 160;
+const SIGNATURE_LIFETIME = 2 * 60 * 1000; // 每組簽名在牆上停留 2 分鐘
+const MAX_CONCURRENT = 30; // 同時最多顯示 30 組，超過時最舊的會提前淡出讓位
+const FADE_DURATION = 2;
+const FLY_IN_DURATION = 1.5;
+const CENTER_HOLD_DURATION = 0.6; // 簽名在正中央亮相停留的時間
+const PADDING = 80;
+
+const COLORS = [
+  0xFF6B6B, 0xFFA94D, 0xFFD93D, 0x69DB7C,
+  0x4DABF7, 0x9775FA, 0xDA77F2, 0x20C997,
+  0xF783AC, 0x74C0FC, 0xFFE066, 0x95E1D3
+];
+
+// === PixiJS 初始化 ===
+// 注意：這裡用的是 pixi.js@7，Application 建構子是同步的，
+// 沒有 v8 的 async app.init()，畫布也是 app.view 而不是 app.canvas。
+const app = new PIXI.Application({
+  resizeTo: window,
+  antialias: true,
+  backgroundColor: 0x0a0a1a,
+  resolution: Math.min(window.devicePixelRatio || 1, 2)
+});
+const bgContainer = new PIXI.Container();
+const sigContainer = new PIXI.Container();
+
+let W, H;
+
+document.getElementById('wall').appendChild(app.view);
+
+W = app.screen.width;
+H = app.screen.height;
+
+app.stage.addChild(bgContainer);
+app.stage.addChild(sigContainer);
+
+createBackground();
+createBackgroundParticles();
+window.addEventListener('resize', onResize);
+
+function onResize() {
+  W = app.screen.width;
+  H = app.screen.height;
+}
+
+// === 背景 ===
+function createBackground() {
+  const g = new PIXI.Graphics();
+  const cx = W / 2;
+  const cy = H / 2;
+  const r = Math.max(W, H) * 0.8;
+  for (let i = 0; i < 20; i++) {
+    const t = i / 20;
+    const alpha = 0.03 * (1 - t);
+    const radius = r * t;
+    g.beginFill(0x1a1a3e, alpha);
+    g.drawCircle(cx, cy, radius);
+    g.endFill();
+  }
+  bgContainer.addChild(g);
+}
+
+function createBackgroundParticles() {
+  const count = 60;
+  for (let i = 0; i < count; i++) {
+    const g = new PIXI.Graphics();
+    const r = 0.5 + Math.random() * 1.5;
+    const alpha = 0.1 + Math.random() * 0.25;
+    g.beginFill(0xffffff, alpha);
+    g.drawCircle(0, 0, r);
+    g.endFill();
+    g.x = Math.random() * W;
+    g.y = Math.random() * H;
+    g.vx = (Math.random() - 0.5) * 0.15;
+    g.vy = (Math.random() - 0.5) * 0.15;
+    bgContainer.addChild(g);
+  }
+  app.ticker.add(() => {
+    for (const child of bgContainer.children) {
+      if (child.vx == null) continue;
+      child.x += child.vx;
+      child.y += child.vy;
+      if (child.x < -10) child.x = W + 10;
+      if (child.x > W + 10) child.x = -10;
+      if (child.y < -10) child.y = H + 10;
+      if (child.y > H + 10) child.y = -10;
+    }
+  });
+}
+
+// === Socket.io 連線 ===
+let socket;
+let sigCount = 0;
+const counterEl = document.getElementById('counter');
+const hintEl = document.getElementById('hint');
+
+function connectSocket() {
+  socket = io(SERVER_URL, { path: '/signwall/socket.io', query: { type: 'wall' } });
+
+  socket.on('connect', () => {
+    hintEl.textContent = '已連線，等待簽名...';
+  });
+
+  socket.on('new-signature', (data) => {
+    sigCount++;
+    counterEl.textContent = `已收到 ${sigCount} 筆簽名`;
+    hintEl.textContent = '';
+    receiveSignature(data);
+  });
+
+  socket.on('disconnect', () => {
+    hintEl.textContent = '連線中斷，等待重新連線...';
+  });
+}
+
+// === 簽名處理 ===
+function receiveSignature(data) {
+  if (!data.strokes || data.strokes.length === 0) return;
+
+  const validStrokes = data.strokes.filter(s => s.length >= 2);
+  if (validStrokes.length === 0) return;
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const stroke of validStrokes) {
+    for (const p of stroke) {
+      if (p.x < minX) minX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y > maxY) maxY = p.y;
+    }
+  }
+
+  const origW = maxX - minX || 1;
+  const origH = maxY - minY || 1;
+
+  // 隨機大小倍率，讓每個簽名顯示出來有大有小（0.6x ~ 1.7x），而不是全部統一縮成同一個框
+  const sizeVariance = 0.6 + Math.random() * 1.1;
+  const targetBoxW = MAX_SIG_W * sizeVariance;
+  const targetBoxH = MAX_SIG_H * sizeVariance;
+  const scale = Math.min(targetBoxW / origW, targetBoxH / origH);
+
+  const cx = (minX + maxX) / 2;
+  const cy = (minY + maxY) / 2;
+  const color = COLORS[Math.floor(Math.random() * COLORS.length)];
+
+  const g = new PIXI.Graphics();
+  g.lineStyle(3, color, 0.9);
+  for (const stroke of validStrokes) {
+    g.moveTo((stroke[0].x - cx) * scale, (stroke[0].y - cy) * scale);
+    for (let i = 1; i < stroke.length; i++) {
+      g.lineTo((stroke[i].x - cx) * scale, (stroke[i].y - cy) * scale);
+    }
+  }
+
+  const container = new PIXI.Container();
+  container.addChild(g);
+
+  const sigW = origW * scale;
+  const sigH = origH * scale;
+  const targetPos = findScatterPosition(sigW, sigH);
+
+  // 先在正中央亮相：放大一點、淡入，讓簽名者看到自己的簽名出現
+  container.x = W / 2;
+  container.y = H / 2;
+  container.alpha = 0;
+  container.scale.set(1.4);
+
+  sigContainer.addChild(container);
+
+  const entry = { container, x: targetPos.x, y: targetPos.y, w: sigW, h: sigH, removeTimer: null };
+  activeSignatures.push(entry);
+  enforceCapacity();
+
+  const tl = gsap.timeline({
+    onComplete: () => {
+      startFloating(container, targetPos.x, targetPos.y);
+      scheduleRemove(entry);
+    }
+  });
+
+  tl.to(container, { alpha: 1, duration: 0.4, ease: 'back.out(1.7)' })
+    .to(container.scale, { x: 1.15, y: 1.15, duration: 0.4, ease: 'back.out(1.7)' }, '<')
+    .to(container, { duration: CENTER_HOLD_DURATION }) // 在正中央停留一下，給簽名者一個亮相時刻
+    .to(container, { x: targetPos.x, y: targetPos.y, duration: FLY_IN_DURATION, ease: 'power3.out' })
+    .to(container.scale, { x: 1, y: 1, duration: FLY_IN_DURATION, ease: 'power3.out' }, '<');
+}
+
+// 目前正在牆上顯示的簽名（依加入順序排列，用來判斷上限與位置避讓）
+let activeSignatures = [];
+
+// 超過同時顯示上限時，讓最舊的那組提前淡出，維持畫面可讀性
+function enforceCapacity() {
+  while (activeSignatures.length > MAX_CONCURRENT) {
+    const oldest = activeSignatures[0];
+    if (oldest.removeTimer) clearTimeout(oldest.removeTimer);
+    fadeOutAndRemove(oldest);
+  }
+}
+
+// 嘗試找一個跟現有簽名不重疊（或至少重疊最少）的位置
+function findScatterPosition(sigW, sigH) {
+  const maxTries = 30;
+  const halfW = sigW / 2;
+  const halfH = sigH / 2;
+  const minX = PADDING + halfW;
+  const maxXPos = Math.max(minX, W - PADDING - halfW);
+  const minY = PADDING + halfH;
+  const maxYPos = Math.max(minY, H - PADDING - halfH);
+
+  let fallback = null;
+  let fallbackMinDist = -Infinity;
+
+  for (let i = 0; i < maxTries; i++) {
+    const x = minX + Math.random() * (maxXPos - minX);
+    const y = minY + Math.random() * (maxYPos - minY);
+
+    let overlaps = false;
+    let minDist = Infinity;
+    for (const p of activeSignatures) {
+      const dx = Math.abs(x - p.x);
+      const dy = Math.abs(y - p.y);
+      // 只要求中心點距離大於兩者半徑合的 0.75 倍，容許一點點交疊但不會整個蓋住
+      const needDist = (Math.max(sigW, p.w) + Math.max(sigH, p.h)) / 2 * 0.6;
+      const dist = Math.hypot(dx, dy);
+      if (dist < needDist) overlaps = true;
+      if (dist < minDist) minDist = dist;
+    }
+
+    if (!overlaps) return { x, y };
+    if (minDist > fallbackMinDist) {
+      fallbackMinDist = minDist;
+      fallback = { x, y };
+    }
+  }
+
+  // 30 次都找不到完全不重疊的位置，就用嘗試過程中「離其他簽名最遠」的那個位置
+  return fallback || {
+    x: minX + Math.random() * (maxXPos - minX),
+    y: minY + Math.random() * (maxYPos - minY)
+  };
+}
+
+// === 漂浮動畫 ===
+function startFloating(container, baseX, baseY) {
+  const phaseX = Math.random() * Math.PI * 2;
+  const phaseY = Math.random() * Math.PI * 2;
+  const phaseR = Math.random() * Math.PI * 2;
+  const ampX = 3 + Math.random() * 5;
+  const ampY = 2 + Math.random() * 4;
+  const speedX = 0.3 + Math.random() * 0.4;
+  const speedY = 0.3 + Math.random() * 0.4;
+  const speedR = 0.2 + Math.random() * 0.3;
+  const ampR = 0.02 + Math.random() * 0.03;
+
+  container._floatData = { baseX, baseY, phaseX, phaseY, phaseR, ampX, ampY, speedX, speedY, speedR, ampR };
+  container._floating = true;
+}
+
+app.ticker.add(() => {
+  const t = performance.now() / 1000;
+  for (const child of sigContainer.children) {
+    if (!child._floating) continue;
+    const d = child._floatData;
+    child.x = d.baseX + Math.sin(t * d.speedX + d.phaseX) * d.ampX;
+    child.y = d.baseY + Math.sin(t * d.speedY + d.phaseY) * d.ampY;
+    child.rotation = Math.sin(t * d.speedR + d.phaseR) * d.ampR;
+  }
+});
+
+// === 停留時間到了自動消失 ===
+function scheduleRemove(entry) {
+  entry.removeTimer = setTimeout(() => {
+    fadeOutAndRemove(entry);
+  }, SIGNATURE_LIFETIME);
+}
+
+function fadeOutAndRemove(entry) {
+  const container = entry.container;
+  gsap.to(container, {
+    alpha: 0,
+    duration: FADE_DURATION,
+    ease: 'power2.in',
+    onComplete: () => {
+      sigContainer.removeChild(container);
+      container.destroy({ children: true });
+      const idx = activeSignatures.indexOf(entry);
+      if (idx !== -1) activeSignatures.splice(idx, 1);
+    }
+  });
+  gsap.to(container.scale, {
+    x: 0.3,
+    y: 0.3,
+    duration: FADE_DURATION,
+    ease: 'power2.in'
+  });
+}
+
+// 所有函式與變數都宣告完成後才連線，避免 let socket 尚未初始化就被存取
+connectSocket();
+</script>
+</body>
+</html>
