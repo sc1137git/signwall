@@ -1,7 +1,11 @@
 services:
   signwall:
     build: .
-    container_name: signwall
+    container_name: signwall-db
     restart: unless-stopped
     ports:
       - "3000:3000"
+    environment:
+      - DB_PATH=/data/signwall.db
+    volumes:
+      - ./data:/data
