@@ -3,42 +3,158 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>SignWall Demo</title>
+<title>SignWall 互動簽名牆 Demo</title>
 <style>
 *{box-sizing:border-box}
-html,body{margin:0;width:100%;height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft JhengHei",sans-serif;background:#0b1220;color:#fff}
-button{font:inherit}.top{height:58px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;border-bottom:1px solid #ffffff16;background:#0f172a;color:#fff}.top b{font-size:20px}.tag{font-size:12px;color:#cbd5e1;background:#ffffff10;padding:6px 10px;border-radius:999px}
-.layout{height:calc(100vh - 58px);display:grid;grid-template-columns:46% 54%}.devices{background:#fff;color:#111827;padding:14px 16px 16px;display:flex;flex-direction:column;min-width:0}.intro{text-align:center;margin-bottom:8px}.intro h2{margin:0 0 3px;font-size:19px}.intro p{margin:0;color:#6b7280;font-size:12px}.phones{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}.phone{width:min(100%,590px);aspect-ratio:19.5/9;background:#111827;border-radius:30px;padding:9px;box-shadow:0 14px 34px #00000022;position:relative}.phone:before{content:"";position:absolute;z-index:9;left:13px;top:50%;transform:translateY(-50%);width:18px;height:70px;border-radius:999px;background:#0b1020;pointer-events:none}.screen{position:relative;width:100%;height:100%;overflow:hidden;border-radius:22px;background:#f8fafc;padding:10px 10px 10px 34px;display:grid;grid-template-columns:minmax(0,1fr) 78px;gap:9px}.write-area{position:relative;width:100%;height:100%;background:#fff;border:2px dashed #94a3b8;border-radius:13px;overflow:hidden;box-shadow:inset 0 0 0 1px #e2e8f0}.write-area:before{content:"可書寫範圍";position:absolute;z-index:3;left:10px;top:8px;color:#64748b;font-size:10px;font-weight:800;background:#fffffff0;padding:2px 6px;border-radius:5px;pointer-events:none}.write-area canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;background:transparent}.side{display:flex;flex-direction:column;gap:8px;align-items:stretch;justify-content:center}.device-label{text-align:center;color:#94a3b8;font-size:11px;font-weight:800}.side button{border:0;border-radius:10px;padding:10px 4px;font-size:12px;font-weight:800}.clear{background:#e5e7eb;color:#374151}.send{background:#2563eb;color:#fff}.send:disabled{opacity:.35}
-.wall{position:relative;overflow:hidden;background:radial-gradient(circle at 50% 45%,#1e293b,#0f172a 58%,#070b13)}#wall{position:absolute;inset:0;width:100%;height:100%;display:block}.hint{position:absolute;left:18px;top:16px;padding:7px 11px;border-radius:999px;background:#0006;color:#e2e8f0;font-size:12px}.empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;color:#64748b;font-size:15px}.empty.hide{display:none}.counter{position:absolute;right:18px;bottom:16px;color:#94a3b8;font-size:12px;background:#0004;padding:6px 9px;border-radius:999px}
-@media(max-width:1000px){.layout{grid-template-columns:50% 50%}.phone{width:min(100%,520px)}.phones{gap:10px}}
-@media(max-width:760px){html,body{overflow:auto}.layout{height:auto;grid-template-columns:1fr}.devices{min-height:620px}.wall{height:48vh}.tag{display:none}.phone{width:min(100%,560px)}}
+:root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft JhengHei",sans-serif;color-scheme:light dark}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#0a0f1c;color:#fff}
+button{font:inherit}
+.top{height:58px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;background:#0f172a;border-bottom:1px solid #ffffff14}
+.brand{display:flex;align-items:center;gap:9px;font-weight:800;font-size:20px}.brand small{font-size:11px;font-weight:600;color:#94a3b8}
+.tag{font-size:12px;color:#cbd5e1;background:#ffffff10;padding:6px 10px;border-radius:999px}
+.layout{height:calc(100vh - 58px);display:grid;grid-template-columns:minmax(480px,46%) minmax(0,54%)}
+.devices{background:#fff;color:#111827;padding:12px 16px 16px;display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.intro{text-align:center;margin-bottom:7px}.intro h2{margin:0 0 2px;font-size:19px}.intro p{margin:0;color:#6b7280;font-size:12px}
+.phones{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+.phone{width:min(100%,610px);aspect-ratio:19.5/9;background:#111827;border-radius:30px;padding:9px;box-shadow:0 14px 34px #00000020;position:relative;overflow:hidden}
+.phone:before{content:"";position:absolute;z-index:10;left:13px;top:50%;transform:translateY(-50%);width:18px;height:70px;border-radius:999px;background:#080d18;pointer-events:none}
+.phone:after{content:"";position:absolute;z-index:10;right:13px;top:50%;transform:translateY(-50%);width:5px;height:46px;border-radius:999px;background:#263244;opacity:.65;pointer-events:none}
+.screen{position:relative;width:100%;height:100%;overflow:hidden;border-radius:22px;background:#f8fafc;padding:9px 9px 9px 33px;display:grid;grid-template-columns:minmax(0,1fr) 82px;gap:9px}
+.write-area{position:relative;width:100%;height:100%;background:#fff;border:2px dashed #94a3b8;border-radius:13px;overflow:hidden;box-shadow:inset 0 0 0 1px #e2e8f0}
+.write-area:before{content:"可書寫範圍";position:absolute;z-index:3;left:9px;top:7px;color:#64748b;font-size:10px;font-weight:800;background:#fffffff0;padding:2px 6px;border-radius:5px;pointer-events:none}
+.write-area canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;background:transparent}
+.side{display:flex;flex-direction:column;gap:7px;align-items:stretch;justify-content:center}.device-label{text-align:center;color:#94a3b8;font-size:11px;font-weight:800;letter-spacing:.4px}.side button{border:0;border-radius:10px;padding:9px 4px;font-size:12px;font-weight:800;cursor:pointer}.clear{background:#e5e7eb;color:#374151}.send{background:#2563eb;color:#fff}.send:disabled{opacity:.35;cursor:default}
+.wall{position:relative;overflow:hidden;background:radial-gradient(circle at 50% 42%,#202b48 0,#111a2d 44%,#090e19 78%,#050812 100%)}
+#wall{position:absolute;inset:0;width:100%;height:100%;display:block}
+.wall:before{content:"";position:absolute;inset:0;pointer-events:none;background-image:radial-gradient(#ffffff22 1px,transparent 1px);background-size:44px 44px;opacity:.16;mask-image:linear-gradient(to bottom,#000,transparent 90%)}
+.wallbar{position:absolute;z-index:8;left:16px;right:16px;top:14px;display:flex;justify-content:space-between;align-items:center;gap:12px;pointer-events:none}
+.modebox{pointer-events:auto;display:flex;align-items:center;gap:4px;background:#050816b8;border:1px solid #ffffff18;padding:4px;border-radius:14px;backdrop-filter:blur(12px)}
+.modebox button{border:0;background:transparent;color:#94a3b8;padding:8px 12px;border-radius:10px;font-size:12px;font-weight:800;cursor:pointer;transition:.18s}.modebox button.active{background:#fff;color:#0f172a;box-shadow:0 3px 12px #0005}
+.wallinfo{display:flex;gap:7px;align-items:center}.pill{background:#050816a8;border:1px solid #ffffff15;color:#cbd5e1;font-size:11px;padding:7px 10px;border-radius:999px;backdrop-filter:blur(10px)}
+.reset{pointer-events:auto;border:1px solid #ffffff18;background:#050816a8;color:#cbd5e1;padding:7px 10px;border-radius:999px;font-size:11px;font-weight:700;cursor:pointer}
+.empty{position:absolute;z-index:3;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;color:#64748b;text-align:center;font-size:14px;line-height:1.7}.empty.hide{display:none}
+.walllabel{position:absolute;z-index:5;left:18px;bottom:15px;color:#64748b;font-size:11px;letter-spacing:.5px;pointer-events:none}.counter{position:absolute;z-index:5;right:18px;bottom:15px;color:#94a3b8;font-size:11px;background:#0005;padding:6px 9px;border-radius:999px;pointer-events:none}
+.toast{position:absolute;z-index:20;left:50%;top:76px;transform:translateX(-50%) translateY(-6px);background:#020617e8;border:1px solid #ffffff18;color:#e2e8f0;padding:8px 13px;border-radius:999px;font-size:11px;opacity:0;transition:.2s;pointer-events:none;white-space:nowrap}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+@media(max-width:1050px){.layout{grid-template-columns:minmax(430px,50%) minmax(0,50%)}.phone{width:min(100%,540px)}.devices{padding-inline:10px}.phones{gap:9px}}
+@media(max-width:790px){html,body{overflow:auto}.top{position:sticky;top:0;z-index:30}.tag{display:none}.brand small{display:none}.layout{height:auto;grid-template-columns:1fr}.devices{min-height:670px}.wall{height:60vh;min-height:440px}.phone{width:min(100%,610px)}}
 </style>
 </head>
 <body>
-<div class="top"><b>✍️ SignWall 互動簽名牆</b><span class="tag">GitHub Pages · 雙裝置互動 Demo</span></div>
+<div class="top"><div class="brand">✍️ SignWall <small>互動簽名牆</small></div><span class="tag">GitHub Pages · 雙裝置 × 雙牆 Demo</span></div>
 <div class="layout">
 <section class="devices">
-<div class="intro"><h2>兩台裝置一起簽名</h2><p>兩台橫向裝置，上下排列；灰色虛線內就是完整可書寫範圍。</p></div>
-<div class="phones">
-<div class="phone"><div class="screen"><div class="write-area"><canvas id="padA"></canvas></div><div class="side"><div class="device-label">裝置 A</div><button class="clear" data-clear="A">清除</button><button class="send" data-send="A" disabled>送出</button></div></div></div>
-<div class="phone"><div class="screen"><div class="write-area"><canvas id="padB"></canvas></div><div class="side"><div class="device-label">裝置 B</div><button class="clear" data-clear="B">清除</button><button class="send" data-send="B" disabled>送出</button></div></div></div>
-</div>
+  <div class="intro"><h2>兩台裝置一起簽名</h2><p>任一台完成後送出，右側牆面會立即展示；虛線內就是可書寫範圍。</p></div>
+  <div class="phones">
+    <div class="phone"><div class="screen"><div class="write-area"><canvas id="padA"></canvas></div><div class="side"><div class="device-label">裝置 A</div><button class="clear" data-clear="A">清除</button><button class="send" data-send="A" disabled>送出</button></div></div></div>
+    <div class="phone"><div class="screen"><div class="write-area"><canvas id="padB"></canvas></div><div class="side"><div class="device-label">裝置 B</div><button class="clear" data-clear="B">清除</button><button class="send" data-send="B" disabled>送出</button></div></div></div>
+  </div>
 </section>
-<section class="wall"><canvas id="wall"></canvas><div class="hint">即時顯示牆 Demo</div><div id="empty" class="empty">從左邊任一台裝置送出第一個簽名</div><div id="counter" class="counter">0 個簽名</div></section>
+<section class="wall">
+  <canvas id="wall"></canvas>
+  <div class="wallbar">
+    <div class="modebox"><button id="floatMode" class="active">漂浮牆</button><button id="gridMode">累積牆</button></div>
+    <div class="wallinfo"><span id="modeHint" class="pill">中央亮相 → 散開漂浮</span><button id="resetWall" class="reset">清空牆面</button></div>
+  </div>
+  <div id="empty" class="empty">先在左邊任一台裝置簽名<br>再按「送出」看看</div>
+  <div id="toast" class="toast"></div>
+  <div id="wallLabel" class="walllabel">漂浮牆 Demo</div>
+  <div id="counter" class="counter">0 個簽名</div>
+</section>
 </div>
 <script>
 const PAD_W=650,PAD_H=360;
+const COLORS=['#ff6b6b','#ffa94d','#ffd93d','#69db7c','#4dabf7','#9775fa','#da77f2','#20c997','#f783ac','#74c0fc','#ffe066','#95e1d3'];
 const wall=document.querySelector('#wall'),wc=wall.getContext('2d'),empty=document.querySelector('#empty'),counter=document.querySelector('#counter');
-const items=[],COLORS=['#ffffff','#93c5fd','#a7f3d0','#fde68a','#f9a8d4','#c4b5fd'];
+const floatBtn=document.querySelector('#floatMode'),gridBtn=document.querySelector('#gridMode'),modeHint=document.querySelector('#modeHint'),wallLabel=document.querySelector('#wallLabel'),toast=document.querySelector('#toast');
+let mode='float',allEntries=[],spotlight=null,spotlightQueue=[];
 function drawStroke(ctx,s){if(s.length<2)return;ctx.beginPath();ctx.moveTo(s[0].x,s[0].y);for(let i=1;i<s.length;i++)ctx.lineTo(s[i].x,s[i].y);ctx.stroke()}
-function makePad(id){const canvas=document.querySelector('#pad'+id),ctx=canvas.getContext('2d'),send=document.querySelector(`[data-send="${id}"]`),clear=document.querySelector(`[data-clear="${id}"]`);const state={id,canvas,ctx,send,strokes:[],current:[],drawing:false};function resize(){const r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(1,Math.round(r.width*d));canvas.height=Math.max(1,Math.round(r.height*d));ctx.setTransform(canvas.width/PAD_W,0,0,canvas.height/PAD_H,0,0);ctx.lineWidth=3.2;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#111827';redraw()}function point(e){const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*PAD_W/r.width,y:(e.clientY-r.top)*PAD_H/r.height}}function redraw(){ctx.clearRect(0,0,PAD_W,PAD_H);state.strokes.forEach(s=>drawStroke(ctx,s));drawStroke(ctx,state.current)}canvas.addEventListener('pointerdown',e=>{e.preventDefault();state.drawing=true;state.current=[point(e)];send.disabled=false;try{canvas.setPointerCapture(e.pointerId)}catch{}});canvas.addEventListener('pointermove',e=>{if(!state.drawing)return;e.preventDefault();const p=point(e);state.current.push(p);if(state.current.length===2){ctx.beginPath();ctx.moveTo(state.current[0].x,state.current[0].y)}ctx.lineTo(p.x,p.y);ctx.stroke()});const up=e=>{if(!state.drawing)return;e.preventDefault();state.drawing=false;if(state.current.length)state.strokes.push(state.current);state.current=[]};canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);clear.onclick=()=>{state.strokes=[];state.current=[];ctx.clearRect(0,0,PAD_W,PAD_H);send.disabled=true};send.onclick=()=>sendToWall(state);state.resize=resize;return state}
-const pads=[makePad('A'),makePad('B')];
 function bounds(ss){let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;for(const s of ss)for(const p of s){minX=Math.min(minX,p.x);minY=Math.min(minY,p.y);maxX=Math.max(maxX,p.x);maxY=Math.max(maxY,p.y)}return{minX,minY,w:Math.max(1,maxX-minX),h:Math.max(1,maxY-minY)}}
-function target(r){const m=95;let best={x:r.width/2,y:r.height/2},score=-1;for(let i=0;i<18;i++){const x=m+Math.random()*Math.max(1,r.width-m*2),y=m+Math.random()*Math.max(1,r.height-m*2);let near=99999;for(const it of items)near=Math.min(near,Math.hypot(x-it.tx,y-it.ty));if(near>score){score=near;best={x,y}}}return best}
-function sendToWall(state){if(!state.strokes.length)return;const ss=state.strokes.map(s=>s.map(p=>({...p}))),b=bounds(ss),r=wall.getBoundingClientRect(),t=target(r),edge=Math.floor(Math.random()*4);let x=t.x,y=t.y;if(edge===0)y=-140;if(edge===1)x=r.width+140;if(edge===2)y=r.height+140;if(edge===3)x=-140;items.push({ss,b,x,y,tx:t.x,ty:t.y,born:performance.now(),scale:Math.min(1.1,Math.max(.25,220/Math.max(b.w,b.h))),color:COLORS[Math.floor(Math.random()*COLORS.length)],px:Math.random()*6.28,py:Math.random()*6.28});empty.classList.add('hide');counter.textContent=items.length+' 個簽名';state.strokes=[];state.current=[];state.ctx.clearRect(0,0,PAD_W,PAD_H);state.send.disabled=true}
-function resizeWall(){const r=wall.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);wall.width=Math.max(1,Math.round(r.width*d));wall.height=Math.max(1,Math.round(r.height*d));wc.setTransform(d,0,0,d,0,0)}
-function frame(t){const r=wall.getBoundingClientRect();wc.clearRect(0,0,r.width,r.height);for(const it of items){const age=t-it.born,p=Math.min(age/850,1),q=1-Math.pow(1-p,3),x=p<1?it.x+(it.tx-it.x)*q:it.tx+Math.sin(t/1000*.35+it.px)*6,y=p<1?it.y+(it.ty-it.y)*q:it.ty+Math.sin(t/1000*.31+it.py)*5;wc.save();wc.translate(x,y);wc.scale(it.scale,it.scale);wc.translate(-it.b.w/2,-it.b.h/2);wc.strokeStyle=it.color;wc.globalAlpha=q;wc.lineWidth=4/it.scale;wc.lineCap='round';wc.lineJoin='round';for(const s of it.ss)drawStroke(wc,s.map(v=>({x:v.x-it.b.minX,y:v.y-it.b.minY})));wc.restore()}requestAnimationFrame(frame)}
-requestAnimationFrame(frame);function resizeAll(){pads.forEach(p=>p.resize());resizeWall()}addEventListener('resize',resizeAll);resizeAll();
+function showToast(text){toast.textContent=text;toast.classList.add('show');clearTimeout(showToast.t);showToast.t=setTimeout(()=>toast.classList.remove('show'),1500)}
+function makePad(id){
+  const canvas=document.querySelector('#pad'+id),ctx=canvas.getContext('2d'),send=document.querySelector(`[data-send="${id}"]`),clear=document.querySelector(`[data-clear="${id}"]`);
+  const state={id,canvas,ctx,send,strokes:[],current:[],drawing:false};
+  function resize(){const r=canvas.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);canvas.width=Math.max(1,Math.round(r.width*d));canvas.height=Math.max(1,Math.round(r.height*d));ctx.setTransform(canvas.width/PAD_W,0,0,canvas.height/PAD_H,0,0);ctx.lineWidth=3.2;ctx.lineCap='round';ctx.lineJoin='round';ctx.strokeStyle='#1a1a2e';redraw()}
+  function point(e){const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*PAD_W/r.width,y:(e.clientY-r.top)*PAD_H/r.height}}
+  function redraw(){ctx.clearRect(0,0,PAD_W,PAD_H);state.strokes.forEach(s=>drawStroke(ctx,s));drawStroke(ctx,state.current)}
+  canvas.addEventListener('pointerdown',e=>{e.preventDefault();state.drawing=true;state.current=[point(e)];send.disabled=false;try{canvas.setPointerCapture(e.pointerId)}catch{}});
+  canvas.addEventListener('pointermove',e=>{if(!state.drawing)return;e.preventDefault();const p=point(e);state.current.push(p);if(state.current.length===2){ctx.beginPath();ctx.moveTo(state.current[0].x,state.current[0].y)}ctx.lineTo(p.x,p.y);ctx.stroke()});
+  const up=e=>{if(!state.drawing)return;e.preventDefault();state.drawing=false;if(state.current.length)state.strokes.push(state.current);state.current=[]};
+  canvas.addEventListener('pointerup',up);canvas.addEventListener('pointercancel',up);
+  clear.onclick=()=>{state.strokes=[];state.current=[];ctx.clearRect(0,0,PAD_W,PAD_H);send.disabled=true};
+  send.onclick=()=>sendToWall(state);state.resize=resize;return state;
+}
+const pads=[makePad('A'),makePad('B')];
+function sendToWall(state){
+  if(!state.strokes.length)return;
+  const ss=state.strokes.map(s=>s.map(p=>({...p}))),b=bounds(ss);
+  const entry={id:Date.now()+Math.random(),ss,b,color:COLORS[Math.floor(Math.random()*COLORS.length)],created:performance.now(),phaseX:Math.random()*Math.PI*2,phaseY:Math.random()*Math.PI*2,phaseR:Math.random()*Math.PI*2,ampX:3+Math.random()*5,ampY:2+Math.random()*4,speedX:.3+Math.random()*.4,speedY:.3+Math.random()*.4,speedR:.2+Math.random()*.3,ampR:.02+Math.random()*.03,state:'queued',x:0,y:0,tx:0,ty:0,scale:1,targetScale:1,alpha:1,angle:0};
+  allEntries.push(entry);spotlightQueue.push(entry);empty.classList.add('hide');updateCounter();state.strokes=[];state.current=[];state.ctx.clearRect(0,0,PAD_W,PAD_H);state.send.disabled=true;processSpotlight();
+}
+function processSpotlight(){
+  if(spotlight||!spotlightQueue.length)return;
+  const entry=spotlightQueue.shift(),r=wall.getBoundingClientRect();
+  entry.state='spotlight';entry.spotStart=performance.now();entry.x=r.width/2;entry.y=r.height/2;entry.scale=1.35;entry.alpha=0;spotlight=entry;
+}
+function finishSpotlight(entry,t){
+  const r=wall.getBoundingClientRect();
+  if(mode==='float'){
+    const pos=findFloatTarget(entry,r);entry.state='moving';entry.moveStart=t;entry.moveDuration=1200;entry.fromX=r.width/2;entry.fromY=r.height/2;entry.fromScale=1.15;entry.tx=pos.x;entry.ty=pos.y;entry.targetScale=fitScale(entry,230,170);
+  }else{
+    entry.state='wall';entry.moveStart=t;entry.moveDuration=950;entry.fromX=r.width/2;entry.fromY=r.height/2;entry.fromScale=1.15;layoutGrid(t,entry);
+  }
+  spotlight=null;setTimeout(processSpotlight,80);
+}
+function fitScale(entry,maxW,maxH){return Math.min(maxW/entry.b.w,maxH/entry.b.h,1.2)}
+function findFloatTarget(entry,r){
+  const existing=allEntries.filter(e=>e!==entry&&(e.state==='float'||e.state==='moving'));
+  const scale=fitScale(entry,230,170),w=entry.b.w*scale,h=entry.b.h*scale,m=72;
+  let best={x:r.width/2,y:r.height/2},bestScore=-1;
+  for(let i=0;i<28;i++){const x=m+w/2+Math.random()*Math.max(1,r.width-2*m-w),y=m+h/2+Math.random()*Math.max(1,r.height-2*m-h);let near=99999;for(const e of existing)near=Math.min(near,Math.hypot(x-e.tx,y-e.ty));if(near>bestScore){bestScore=near;best={x,y}}}
+  return best;
+}
+function gridTargets(r,count){
+  const margin=24,areaH=Math.max(100,Math.min(260,r.height*.30)),area={x:margin,y:r.height-areaH-margin,w:Math.max(1,r.width-margin*2),h:areaH};
+  let cols=Math.max(1,Math.round(Math.sqrt(count*area.w/area.h))),rows=Math.ceil(count/cols),tile=Math.min(area.w/cols,area.h/rows);if(tile<30){tile=30;cols=Math.max(1,Math.floor(area.w/tile));rows=Math.ceil(count/cols)}
+  const gw=cols*tile,gh=rows*tile,sx=area.x+(area.w-gw)/2,sy=area.y+area.h-gh;return Array.from({length:count},(_,i)=>({x:sx+(i%cols)*tile+tile/2,y:sy+Math.floor(i/cols)*tile+tile/2,scale:tile*.78}));
+}
+function layoutGrid(t,newEntry=null){
+  const r=wall.getBoundingClientRect(),entries=allEntries.filter(e=>e.state!=='queued'&&e.state!=='spotlight');if(newEntry&&!entries.includes(newEntry))entries.push(newEntry);
+  const targets=gridTargets(r,entries.length);
+  entries.forEach((e,i)=>{const target=targets[i];if(e!==newEntry){e.fromX=currentX(e,t);e.fromY=currentY(e,t);e.fromScale=currentScale(e,t);e.moveStart=t;e.moveDuration=700}e.tx=target.x;e.ty=target.y;e.targetScale=target.scale/Math.max(e.b.w,e.b.h);e.state='wall-moving'});
+}
+function switchMode(next){
+  if(mode===next)return;mode=next;floatBtn.classList.toggle('active',mode==='float');gridBtn.classList.toggle('active',mode==='grid');modeHint.textContent=mode==='float'?'中央亮相 → 散開漂浮':'中央亮相 → 下方累積重排';wallLabel.textContent=mode==='float'?'漂浮牆 Demo':'累積牆 Demo';
+  const t=performance.now(),r=wall.getBoundingClientRect();
+  if(mode==='grid'){
+    layoutGrid(t);
+  }else{
+    const entries=allEntries.filter(e=>e!==spotlight&&e.state!=='queued');entries.forEach(e=>{const pos=findFloatTarget(e,r);e.fromX=currentX(e,t);e.fromY=currentY(e,t);e.fromScale=currentScale(e,t);e.moveStart=t;e.moveDuration=850;e.tx=pos.x;e.ty=pos.y;e.targetScale=fitScale(e,230,170);e.state='moving'});
+  }
+  showToast(mode==='float'?'已切換：漂浮牆':'已切換：累積牆');
+}
+floatBtn.onclick=()=>switchMode('float');gridBtn.onclick=()=>switchMode('grid');
+document.querySelector('#resetWall').onclick=()=>{allEntries=[];spotlightQueue=[];spotlight=null;empty.classList.remove('hide');updateCounter();showToast('牆面已清空')};
+function updateCounter(){counter.textContent=allEntries.length+' 個簽名'}
+function easeOut(p){return 1-Math.pow(1-p,3)}
+function currentX(e,t){if(e.state==='moving'||e.state==='wall-moving'){const p=Math.min(1,(t-e.moveStart)/e.moveDuration),q=easeOut(Math.max(0,p));return e.fromX+(e.tx-e.fromX)*q}return e.tx||e.x}
+function currentY(e,t){if(e.state==='moving'||e.state==='wall-moving'){const p=Math.min(1,(t-e.moveStart)/e.moveDuration),q=easeOut(Math.max(0,p));return e.fromY+(e.ty-e.fromY)*q}return e.ty||e.y}
+function currentScale(e,t){if(e.state==='moving'||e.state==='wall-moving'){const p=Math.min(1,(t-e.moveStart)/e.moveDuration),q=easeOut(Math.max(0,p));return e.fromScale+(e.targetScale-e.fromScale)*q}return e.targetScale||e.scale||1}
+function drawEntry(e,t){
+  const r=wall.getBoundingClientRect();let x=e.x,y=e.y,scale=e.scale,alpha=1,rot=0;
+  if(e.state==='spotlight'){
+    const age=t-e.spotStart,fade=Math.min(age/350,1),hold=mode==='grid'?2200:900;alpha=easeOut(fade);scale=1.35-(.20*easeOut(fade));x=r.width/2;y=r.height/2;if(age>hold)finishSpotlight(e,t);
+  }else if(e.state==='moving'||e.state==='wall-moving'){
+    const p=Math.min(1,Math.max(0,(t-e.moveStart)/e.moveDuration)),q=easeOut(p);x=e.fromX+(e.tx-e.fromX)*q;y=e.fromY+(e.ty-e.fromY)*q;scale=e.fromScale+(e.targetScale-e.fromScale)*q;if(p>=1)e.state=mode==='float'?'float':'wall';
+  }else if(e.state==='float'){
+    x=e.tx+Math.sin(t/1000*e.speedX+e.phaseX)*e.ampX;y=e.ty+Math.sin(t/1000*e.speedY+e.phaseY)*e.ampY;scale=e.targetScale;rot=Math.sin(t/1000*e.speedR+e.phaseR)*e.ampR;
+  }else if(e.state==='wall'){x=e.tx;y=e.ty;scale=e.targetScale}
+  if(e.state==='queued')return;
+  wc.save();wc.translate(x,y);wc.rotate(rot);wc.scale(scale,scale);wc.translate(-e.b.w/2,-e.b.h/2);wc.strokeStyle=e.color;wc.globalAlpha=alpha;wc.lineWidth=4/Math.max(scale,.15);wc.lineCap='round';wc.lineJoin='round';for(const s of e.ss)drawStroke(wc,s.map(v=>({x:v.x-e.b.minX,y:v.y-e.b.minY})));wc.restore();
+}
+function resizeWall(){const r=wall.getBoundingClientRect(),d=Math.min(devicePixelRatio||1,2);wall.width=Math.max(1,Math.round(r.width*d));wall.height=Math.max(1,Math.round(r.height*d));wc.setTransform(d,0,0,d,0,0);if(mode==='grid'&&allEntries.length)layoutGrid(performance.now())}
+function frame(t){const r=wall.getBoundingClientRect();wc.clearRect(0,0,r.width,r.height);for(const e of allEntries)drawEntry(e,t);requestAnimationFrame(frame)}
+function resizeAll(){pads.forEach(p=>p.resize());resizeWall()}
+addEventListener('resize',resizeAll);resizeAll();requestAnimationFrame(frame);
 </script>
 </body>
 </html>
