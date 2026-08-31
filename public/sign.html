@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>互動簽名牆 - 簽名</title>
+<script src="/signwall/socket.io/socket.io.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-user-select: none; user-select: none; }
+html, body { width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, "Helvetica Neue", sans-serif; background: #f8f9fa; touch-action: none; }
+#app { display: flex; flex-direction: column; height: 100%; }
+#header { text-align: center; padding: 12px 16px; background: #fff; border-bottom: 1px solid #e9ecef; }
+#header h1 { font-size: 18px; font-weight: 600; color: #212529; }
+#header p { font-size: 12px; color: #868e96; margin-top: 2px; }
+#canvas-wrap { flex: 1; display: flex; align-items: center; justify-content: center; background: #fff; margin: 8px; border-radius: 16px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+#canvas-wrap canvas { display: block; border-radius: 12px; touch-action: none; }
+#toolbar { display: flex; gap: 12px; padding: 16px; justify-content: center; background: #fff; border-top: 1px solid #e9ecef; }
+.btn { padding: 14px 40px; font-size: 17px; font-weight: 600; border: none; border-radius: 12px; cursor: pointer; transition: transform 0.1s, opacity 0.1s; touch-action: manipulation; }
+.btn:active { transform: scale(0.96); }
+#clearBtn { background: #e9ecef; color: #495057; }
+#doneBtn { background: #1a73e8; color: #fff; }
+#doneBtn:disabled { opacity: 0.4; }
+#status { position: fixed; top: 60px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.75); color: #fff; padding: 8px 20px; border-radius: 20px; font-size: 14px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100; }
+#status.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <h1>✍️ 互動簽名牆</h1>
+    <p>請在下方簽名，完成後按 ✓</p>
+  </div>
+  <div id="canvas-wrap">
+    <canvas id="canvas"></canvas>
+  </div>
+  <div id="toolbar">
+    <button class="btn" id="clearBtn">清除</button>
+    <button class="btn" id="doneBtn" disabled>完成 ✓</button>
+  </div>
+</div>
+<div id="status"></div>
+<script>
+// === 設定 ===
+let LOGICAL_W = 800;
+let LOGICAL_H = 400;
+const LINE_COLOR = '#1a1a2e';
+const LINE_WIDTH = 3;
+const SERVER_URL = window.location.origin;
+
+// === Socket.io ===
+let socket = null;
+let connected = false;
+const offlineQueue = [];
+
+function connectSocket() {
+  socket = io(SERVER_URL, { path: '/signwall/socket.io', query: { type: 'sign' } });
+
+  socket.on('connect', () => {
+    connected = true;
+    showStatus('已連線', '#2b8a3e');
+    flushQueue();
+  });
+
+  socket.on('disconnect', () => {
+    connected = false;
+    showStatus('連線中斷，簽名將暫存', '#e67700');
+  });
+
+  socket.on('connect_error', () => {
+    connected = false;
+    showStatus('無法連線伺服器', '#e03131');
+  });
+}
+
+function flushQueue() {
+  while (offlineQueue.length > 0) {
+    const data = offlineQueue.shift();
+    socket.emit('new-signature', data);
+  }
+}
+
+function sendSignature(data) {
+  if (connected) {
+    socket.emit('new-signature', data);
+    showStatus('簽名已送出 ✓', '#2b8a3e');
+  } else {
+    offlineQueue.push(data);
+    showStatus('離線模式，簽名已暫存', '#e67700');
+  }
+}
+
+function showStatus(msg, color) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.style.background = color || 'rgba(0,0,0,0.75)';
+  el.classList.add('show');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.remove('show'), 2500);
+}
+
+// === Canvas ===
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let isDrawing = false;
+let currentStroke = [];
+let strokes = [];
+
+function resizeCanvas() {
+  const wrap = document.getElementById('canvas-wrap');
+  const displayW = Math.floor(wrap.clientWidth - 24);
+  const displayH = Math.floor(wrap.clientHeight - 24);
+  const dpr = window.devicePixelRatio || 1;
+
+  // 畫布邏輯尺寸直接等於容器可見大小，手機直式、iPad 橫放都不會有摸不到的空白區
+  const sizeChanged = LOGICAL_W !== displayW || LOGICAL_H !== displayH;
+  LOGICAL_W = displayW;
+  LOGICAL_H = displayH;
+
+  canvas.width = LOGICAL_W * dpr;
+  canvas.height = LOGICAL_H * dpr;
+  canvas.style.width = displayW + 'px';
+  canvas.style.height = displayH + 'px';
+
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+  ctx.strokeStyle = LINE_COLOR;
+  ctx.lineWidth = LINE_WIDTH;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // 尺寸真的變了（例如旋轉螢幕）就清空，避免舊筆畫座標對不上新比例而扭曲
+  if (sizeChanged && (strokes.length > 0 || currentStroke.length > 0)) {
+    clearCanvas();
+  } else {
+    redrawAll();
+  }
+}
+
+function getPos(e) {
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = LOGICAL_W / rect.width;
+  const scaleY = LOGICAL_H / rect.height;
+  const clientX = e.clientX !== undefined ? e.clientX : e.touches[0].clientX;
+  const clientY = e.clientY !== undefined ? e.clientY : e.touches[0].clientY;
+  return {
+    x: (clientX - rect.left) * scaleX,
+    y: (clientY - rect.top) * scaleY
+  };
+}
+
+function redrawAll() {
+  ctx.clearRect(0, 0, LOGICAL_W, LOGICAL_H);
+  for (const stroke of strokes) {
+    drawStroke(stroke);
+  }
+  if (currentStroke.length > 0) {
+    drawStroke(currentStroke);
+  }
+}
+
+function drawStroke(points) {
+  if (points.length < 2) return;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  for (let i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i].x, points[i].y);
+  }
+  ctx.stroke();
+}
+
+// Pointer Events (handles both touch and mouse)
+function onPointerDown(e) {
+  e.preventDefault();
+  const pos = getPos(e);
+  isDrawing = true;
+  currentStroke = [pos];
+  ctx.beginPath();
+  ctx.moveTo(pos.x, pos.y);
+  document.getElementById('doneBtn').disabled = false;
+}
+
+function onPointerMove(e) {
+  e.preventDefault();
+  if (!isDrawing) return;
+  const pos = getPos(e);
+  currentStroke.push(pos);
+  ctx.lineTo(pos.x, pos.y);
+  ctx.stroke();
+}
+
+function onPointerUp(e) {
+  e.preventDefault();
+  if (!isDrawing) return;
+  isDrawing = false;
+  if (currentStroke.length > 0) {
+    strokes.push(currentStroke);
+  }
+  currentStroke = [];
+}
+
+// Mouse events (fallback)
+canvas.addEventListener('mousedown', (e) => {
+  if (e.pointerType) return;
+  onPointerDown(e);
+});
+canvas.addEventListener('mousemove', (e) => {
+  if (e.pointerType) return;
+  onPointerMove(e);
+});
+canvas.addEventListener('mouseup', (e) => {
+  if (e.pointerType) return;
+  onPointerUp(e);
+});
+canvas.addEventListener('mouseleave', (e) => {
+  if (e.pointerType) return;
+  if (isDrawing) onPointerUp(e);
+});
+
+// Touch events (fallback for older browsers)
+canvas.addEventListener('touchstart', (e) => {
+  if (window.PointerEvent) return;
+  e.preventDefault();
+  if (e.touches.length === 1) onPointerDown(e);
+}, { passive: false });
+canvas.addEventListener('touchmove', (e) => {
+  if (window.PointerEvent) return;
+  e.preventDefault();
+  if (e.touches.length === 1) onPointerMove(e);
+}, { passive: false });
+canvas.addEventListener('touchend', (e) => {
+  if (window.PointerEvent) return;
+  e.preventDefault();
+  onPointerUp(e);
+}, { passive: false });
+
+// Pointer Events (primary)
+if (window.PointerEvent) {
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('pointercancel', onPointerUp);
+}
+
+// === Actions ===
+function clearCanvas() {
+  strokes = [];
+  currentStroke = [];
+  isDrawing = false;
+  ctx.clearRect(0, 0, LOGICAL_W, LOGICAL_H);
+  document.getElementById('doneBtn').disabled = true;
+}
+
+async function doneSignature() {
+  if (strokes.length === 0) return;
+
+  const data = {
+    id: Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+    strokes: strokes.slice(),
+    timestamp: Date.now()
+  };
+
+  document.getElementById('doneBtn').disabled = true;
+  document.getElementById('clearBtn').disabled = true;
+
+  await playDisappear();
+
+  sendSignature(data);
+
+  strokes = [];
+  currentStroke = [];
+  ctx.clearRect(0, 0, LOGICAL_W, LOGICAL_H);
+
+  document.getElementById('clearBtn').disabled = false;
+}
+
+function playDisappear() {
+  return new Promise((resolve) => {
+    const duration = 800;
+    const startTime = performance.now();
+    const allStrokes = strokes.slice();
+
+    function frame(time) {
+      const elapsed = time - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const alpha = 1 - eased;
+      const offsetY = -eased * 120;
+
+      ctx.clearRect(0, 0, LOGICAL_W, LOGICAL_H);
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, alpha);
+      ctx.translate(0, offsetY);
+      ctx.strokeStyle = LINE_COLOR;
+      ctx.lineWidth = LINE_WIDTH;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (const stroke of allStrokes) {
+        if (stroke.length < 2) continue;
+        ctx.beginPath();
+        ctx.moveTo(stroke[0].x, stroke[0].y);
+        for (let i = 1; i < stroke.length; i++) {
+          ctx.lineTo(stroke[i].x, stroke[i].y);
+        }
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      if (progress < 1) {
+        requestAnimationFrame(frame);
+      } else {
+        resolve();
+      }
+    }
+
+    requestAnimationFrame(frame);
+  });
+}
+
+document.getElementById('clearBtn').addEventListener('click', clearCanvas);
+document.getElementById('doneBtn').addEventListener('click', doneSignature);
+
+// === Init ===
+window.addEventListener('resize', resizeCanvas);
+connectSocket();
+resizeCanvas();
+</script>
+</body>
+</html>
