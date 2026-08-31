@@ -5,38 +5,37 @@ const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
+
+// 因為網域路徑會多一層 /signwall/，Socket.io 的連線路徑也要跟著加這個前綴，
+// 不然反向代理轉發過來的 WebSocket 請求會對不上（造成頁面打得開、但簽名傳不過去）。
+const BASE_PATH = '/signwall';
+
 const io = new Server(server, {
   cors: { origin: '*' },
-  maxHttpBufferSize: 1e6
+  path: `${BASE_PATH}/socket.io`
 });
 
 const PORT = process.env.PORT || 3000;
-const MAX_STROKES = 500;
-const MAX_POINTS = 10000;
 
-app.get('/', (_req, res) => res.redirect('/sign.html'));
-app.get('/sign.html', (_req, res) => res.sendFile(path.join(__dirname, 'sign.html')));
-app.get('/wall.html', (_req, res) => res.sendFile(path.join(__dirname, 'wall.html')));
-app.get('/health', (_req, res) => res.json({ ok: true }));
+// 只公開 public 資料夾，路徑一樣加上 /signwall 前綴，避免 server.js / package.json 這些原始碼檔案被外部直接下載
+app.use(BASE_PATH, express.static(path.join(__dirname, 'public')));
 
 let signatureCount = 0;
 
-function isValidSignature(data) {
-  if (!data || typeof data !== 'object' || !Array.isArray(data.strokes)) return false;
-  if (typeof data.id !== 'string' || data.id.length > 100) return false;
-  if (data.strokes.length === 0 || data.strokes.length > MAX_STROKES) return false;
-
-  let pointCount = 0;
-  for (const stroke of data.strokes) {
-    if (!Array.isArray(stroke)) return false;
-    pointCount += stroke.length;
-    if (pointCount > MAX_POINTS) return false;
-    for (const p of stroke) {
-      if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return false;
-      if (p.x < -100 || p.x > 900 || p.y < -100 || p.y > 500) return false;
-    }
-  }
-  return true;
+function isValidSignaturePayload(data) {
+  return (
+    data &&
+    typeof data.id !== 'undefined' &&
+    Array.isArray(data.strokes) &&
+    data.strokes.length > 0 &&
+    data.strokes.every(
+      (stroke) =>
+        Array.isArray(stroke) &&
+        stroke.every(
+          (p) => p && typeof p.x === 'number' && typeof p.y === 'number'
+        )
+    )
+  );
 }
 
 io.on('connection', (socket) => {
@@ -44,8 +43,8 @@ io.on('connection', (socket) => {
   console.log(`[連線] ${socket.id} (${clientType})`);
 
   socket.on('new-signature', (data) => {
-    if (!isValidSignature(data)) {
-      console.warn(`[拒絕] ${socket.id} 傳入無效簽名資料`);
+    if (!isValidSignaturePayload(data)) {
+      console.warn(`[忽略] ${socket.id} 傳來格式不正確的簽名資料`);
       return;
     }
 
@@ -59,8 +58,8 @@ io.on('connection', (socket) => {
   });
 });
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`伺服器啟動：http://0.0.0.0:${PORT}`);
-  console.log(`  簽名端：http://localhost:${PORT}/sign.html`);
-  console.log(`  顯示牆：http://localhost:${PORT}/wall.html`);
+server.listen(PORT, () => {
+  console.log(`伺服器啟動：http://0.0.0.0:${PORT}${BASE_PATH}`);
+  console.log(`  sign.html → http://localhost:${PORT}${BASE_PATH}/sign.html`);
+  console.log(`  wall.html → http://localhost:${PORT}${BASE_PATH}/wall.html`);
 });
