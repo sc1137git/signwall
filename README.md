@@ -1,63 +1,54 @@
-# 互動簽名牆 SignWall
+# SignWall — Database
 
-一個以 Node.js + Socket.IO 製作的即時互動簽名牆。
+這個分支以目前正式版為基準，保留 `/signwall/` 子路徑與兩種展示牆，並新增 SQLite 持久化儲存。
 
-- `sign.html`：iPad / 手機 / 觸控裝置簽名端
-- `wall.html`：投影機或大型顯示器的簽名牆
-- `server.js`：Express + Socket.IO 即時傳送服務
-- `Dockerfile` / `docker-compose.yml`：可直接以 Docker 部署
-- `docs/index.html`：GitHub Pages 可玩的單機互動 Demo
+- `/signwall/sign.html`：簽名端
+- `/signwall/wall.html`：漂浮散佈牆
+- `/signwall/wall-v2.html`：中央亮相＋下方累積牆
+- `/signwall/api/signatures?limit=200`：讀取已儲存簽名
+- `/signwall/api/export`：匯出全部簽名 JSON
+- `/signwall/health`：服務與資料庫狀態
 
-## 版本分支
+## 資料庫
 
-- `main`：標準即時版；不保存歷史簽名，顯示牆使用 PixiJS + GSAP CDN。
-- `offline`：現場執行不需要 Internet；顯示牆使用原生 Canvas 2D，校內 LAN 即可運作。
-- `database`：SQLite 持久化版；可在重啟後恢復簽名，並提供 JSON 匯出。
-
-## GitHub Pages Demo
-
-`docs/index.html` 是純靜態展示版，可在同一頁左邊簽名、右邊看簽名飛入顯示牆。
-
-GitHub Pages 請設定：
-
-1. Repository → Settings → Pages
-2. Build and deployment → Deploy from a branch
-3. Branch 選 `main`
-4. Folder 選 `/docs`
-
-啟用後網址預期為：
+使用 Node.js 24 內建 `node:sqlite`，預設資料庫位置：
 
 ```text
-https://sc1137git.github.io/signwall/
+/data/signwall.db
 ```
 
-> Pages Demo 不執行 Node.js / Socket.IO，所以是單機互動展示，不是正式的多 iPad 跨裝置同步版本。
+Docker Compose 會把主機的 `./data` 掛載到容器 `/data`，所以重新建立容器後資料仍會保留。
 
-## 本機執行
+`data/`、`*.db`、WAL/SHM 檔案都已加入 `.gitignore`，不會把真實簽名資料推到 GitHub。
 
-```bash
-npm install
-npm start
-```
-
-開啟：
-
-- 簽名端：`http://localhost:3000/sign.html`
-- 顯示牆：`http://localhost:3000/wall.html`
-- 健康檢查：`http://localhost:3000/health`
-
-同一個區域網路內的 iPad，請把 `localhost` 換成伺服器 / NAS 的 IP。
-
-## Docker Compose
+## Docker
 
 ```bash
 docker compose up -d --build
 ```
 
-預設對外連接埠為 `3000`。如需更換，可修改 `docker-compose.yml`。
+預設連接埠：`3000`
 
-## main 分支注意事項
+```text
+http://NAS-IP:3000/signwall/sign.html
+http://NAS-IP:3000/signwall/wall.html
+http://NAS-IP:3000/signwall/wall-v2.html
+```
 
-`wall.html` 使用 jsDelivr 載入 PixiJS 7 與 GSAP，因此 `main` 顯示牆瀏覽器需要能連上網際網路。若活動現場可能斷外網，請改用 `offline` 分支。
+此分支也把 PixiJS / GSAP 由 npm 安裝後改為由本機伺服器提供，因此活動執行時不依賴 CDN。
 
-`main` 採即時暫存設計，不使用資料庫；若需要永久保存簽名，請使用 `database` 分支。
+## 備份
+
+最重要的是備份：
+
+```text
+./data/signwall.db
+```
+
+也可以直接開啟：
+
+```text
+/signwall/api/export
+```
+
+下載全部簽名的 JSON 備份。
