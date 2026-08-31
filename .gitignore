@@ -3,3 +3,7 @@ npm-debug.log*
 .env
 .DS_Store
 Thumbs.db
+data/
+*.db
+*.db-wal
+*.db-shm
