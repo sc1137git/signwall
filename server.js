@@ -10,8 +10,8 @@ const io = new Server(server, { cors: { origin: '*' }, path: `${BASE_PATH}/socke
 const PORT = process.env.PORT || 3000;
 app.use(BASE_PATH, express.static(path.join(__dirname, 'public')));
 
-// Original sign-wall traffic is still supported on this branch.
 let signatureCount = 0;
+let timerHandle = null;
 
 const game = {
   round: 1,
@@ -19,7 +19,10 @@ const game = {
   scores: Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i + 1, 0])),
   responses: {},
   history: [],
-  activePlayers: []
+  activePlayers: [],
+  timerDuration: 30,
+  timerEndAt: null,
+  locked: false
 };
 const socketPlayers = new Map();
 
@@ -29,7 +32,10 @@ function fullState() {
     question: game.question,
     scores: { ...game.scores },
     responses: { ...game.responses },
-    activePlayers: [...game.activePlayers]
+    activePlayers: [...game.activePlayers],
+    timerDuration: game.timerDuration,
+    timerEndAt: game.timerEndAt,
+    locked: game.locked
   };
 }
 
@@ -37,7 +43,10 @@ function studentState() {
   return {
     round: game.round,
     question: game.question,
-    activePlayers: [...game.activePlayers]
+    activePlayers: [...game.activePlayers],
+    timerDuration: game.timerDuration,
+    timerEndAt: game.timerEndAt,
+    locked: game.locked
   };
 }
 
@@ -73,6 +82,29 @@ function updateActivePlayers() {
   io.emit('active-players', game.activePlayers);
 }
 
+function clearTimer() {
+  if (timerHandle) clearTimeout(timerHandle);
+  timerHandle = null;
+  game.timerEndAt = null;
+}
+
+function endTimer() {
+  if (game.locked) return;
+  game.locked = true;
+  game.timerEndAt = Date.now();
+  timerHandle = null;
+  emitStateEvent('timer-ended');
+}
+
+function startTimer(seconds) {
+  clearTimer();
+  game.timerDuration = seconds;
+  game.locked = false;
+  game.timerEndAt = Date.now() + seconds * 1000;
+  timerHandle = setTimeout(endTimer, seconds * 1000);
+  emitStateEvent('timer-started');
+}
+
 function archiveCurrentRound() {
   if (!game.question && Object.keys(game.responses).length === 0) return;
   game.history.push({
@@ -80,6 +112,7 @@ function archiveCurrentRound() {
     question: game.question,
     responses: JSON.parse(JSON.stringify(game.responses)),
     scoresAfterRound: { ...game.scores },
+    timerDuration: game.timerDuration,
     endedAt: Date.now()
   });
   if (game.history.length > 100) game.history.shift();
@@ -92,7 +125,6 @@ io.on('connection', socket => {
 
   socket.emit('game-state', clientType === 'student' ? studentState() : fullState());
 
-  // Legacy SignWall event.
   socket.on('new-signature', data => {
     if (!data || !Array.isArray(data.strokes) || !data.strokes.length) return;
     signatureCount++;
@@ -107,13 +139,11 @@ io.on('connection', socket => {
     if (clientType !== 'student') return;
     const player = Number(data?.player);
     if (!validPlayer(player)) return;
-
     const occupied = [...socketPlayers.entries()].some(([socketId, p]) => socketId !== socket.id && p === player);
     if (occupied) {
       socket.emit('player-select-result', { ok: false, player, reason: 'occupied' });
       return;
     }
-
     socketPlayers.set(socket.id, player);
     updateActivePlayers();
     socket.emit('player-select-result', { ok: true, player });
@@ -121,6 +151,11 @@ io.on('connection', socket => {
 
   socket.on('submit-answer', data => {
     if (clientType !== 'student') return;
+    if (game.timerEndAt && Date.now() >= game.timerEndAt) endTimer();
+    if (game.locked) {
+      socket.emit('submit-result', { ok: false, reason: 'locked' });
+      return;
+    }
     const player = Number(data?.player);
     const width = Number(data?.width);
     const height = Number(data?.height);
@@ -128,7 +163,6 @@ io.on('connection', socket => {
     if (Number(data?.round) !== game.round) return;
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0 || width > 5000 || height > 5000) return;
     if (!validStrokes(data?.strokes, width, height)) return;
-
     const response = {
       player,
       round: game.round,
@@ -139,6 +173,7 @@ io.on('connection', socket => {
     };
     game.responses[player] = response;
     io.to('teacher').to('display').emit('answer-updated', { player, response });
+    socket.emit('submit-result', { ok: true });
   });
 
   socket.on('teacher-set-question', data => {
@@ -147,13 +182,22 @@ io.on('connection', socket => {
     emitStateEvent('question-changed');
   });
 
+  socket.on('teacher-start-timer', data => {
+    if (clientType !== 'teacher') return;
+    const seconds = Math.round(Number(data?.seconds));
+    if (!Number.isFinite(seconds) || seconds < 5 || seconds > 300) return;
+    startTimer(seconds);
+  });
+
   socket.on('teacher-score', data => {
     if (clientType !== 'teacher') return;
     const player = Number(data?.player);
     const delta = Number(data?.delta);
     if (!validPlayer(player) || !Number.isFinite(delta) || Math.abs(delta) > 10) return;
-    game.scores[player] = Math.max(0, (game.scores[player] || 0) + delta);
-    io.to('teacher').to('display').emit('score-updated', { player, score: game.scores[player] });
+    const oldScore = game.scores[player] || 0;
+    game.scores[player] = Math.max(0, oldScore + delta);
+    const appliedDelta = game.scores[player] - oldScore;
+    io.to('teacher').to('display').emit('score-updated', { player, score: game.scores[player], delta: appliedDelta });
   });
 
   socket.on('teacher-clear-answers', () => {
@@ -165,18 +209,22 @@ io.on('connection', socket => {
   socket.on('teacher-next-round', () => {
     if (clientType !== 'teacher') return;
     archiveCurrentRound();
+    clearTimer();
     game.round += 1;
     game.question = '';
     game.responses = {};
+    game.locked = false;
     emitStateEvent('round-changed');
   });
 
   socket.on('teacher-reset-all', () => {
     if (clientType !== 'teacher') return;
+    clearTimer();
     game.round = 1;
     game.question = '';
     game.responses = {};
     game.history = [];
+    game.locked = false;
     for (let i = 1; i <= 12; i++) game.scores[i] = 0;
     emitStateEvent('reset-all');
   });
