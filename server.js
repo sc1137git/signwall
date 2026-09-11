@@ -14,6 +14,7 @@ let signatureCount = 0;
 let timerHandle = null;
 const ALL_PLAYERS = Array.from({ length: 12 }, (_, i) => i + 1);
 const PAPER_STYLES = new Set(['white', 'english', 'chinese']);
+const AUTO_FINAL_GRACE_MS = 1500;
 
 const game = {
   round: 1,
@@ -30,15 +31,14 @@ const game = {
   previewEndAt: null,
   timerDuration: 30,
   timerEndAt: null,
+  finalizeGraceUntil: null,
   phase: 'waiting', // waiting | practice | preview | running | ended
   locked: true,
   displayViewRound: 1
 };
 const socketPlayers = new Map();
 
-function historyRounds() {
-  return game.history.map(h => h.round);
-}
+function historyRounds() { return game.history.map(h => h.round); }
 
 function fullState() {
   return {
@@ -115,34 +115,22 @@ function displayStateForRound(round) {
   };
 }
 
-function currentDisplayState() {
-  return displayStateForRound(game.displayViewRound);
-}
-
-function sendDisplayState() {
-  io.to('display').emit('display-state', currentDisplayState());
-}
-
+function currentDisplayState() { return displayStateForRound(game.displayViewRound); }
+function sendDisplayState() { io.to('display').emit('display-state', currentDisplayState()); }
 function emitStateEvent(eventName) {
   io.to('student').emit(eventName, studentState());
   io.to('teacher').emit(eventName, fullState());
   sendDisplayState();
 }
 
-function validPlayer(n) {
-  return Number.isInteger(n) && n >= 1 && n <= 12;
-}
+function validPlayer(n) { return Number.isInteger(n) && n >= 1 && n <= 12; }
+function isEligible(player) { return game.eligiblePlayers.includes(player); }
+function hasAward(player) { return Object.prototype.hasOwnProperty.call(game.roundAwards, player); }
 
-function isEligible(player) {
-  return game.eligiblePlayers.includes(player);
-}
-
-function hasAward(player) {
-  return Object.prototype.hasOwnProperty.call(game.roundAwards, player);
-}
-
-function validStrokes(strokes, width, height) {
-  if (!Array.isArray(strokes) || strokes.length === 0 || strokes.length > 120) return false;
+function validStrokes(strokes, width, height, allowEmpty = false) {
+  if (!Array.isArray(strokes)) return false;
+  if (!allowEmpty && strokes.length === 0) return false;
+  if (strokes.length > 120) return false;
   let totalPoints = 0;
   for (const stroke of strokes) {
     if (!Array.isArray(stroke) || stroke.length === 0 || stroke.length > 2500) return false;
@@ -169,6 +157,7 @@ function clearRoundTimer() {
   timerHandle = null;
   game.previewEndAt = null;
   game.timerEndAt = null;
+  game.finalizeGraceUntil = null;
 }
 
 function endAnswering() {
@@ -176,6 +165,7 @@ function endAnswering() {
   game.phase = 'ended';
   game.locked = true;
   game.timerEndAt = Date.now();
+  game.finalizeGraceUntil = Date.now() + AUTO_FINAL_GRACE_MS;
   timerHandle = null;
   emitStateEvent('timer-ended');
 }
@@ -185,6 +175,7 @@ function beginAnswering() {
   game.phase = 'running';
   game.locked = false;
   game.previewEndAt = null;
+  game.finalizeGraceUntil = null;
   game.timerEndAt = Date.now() + game.timerDuration * 1000;
   timerHandle = setTimeout(endAnswering, game.timerDuration * 1000);
   emitStateEvent('answer-started');
@@ -270,6 +261,13 @@ function clearAward(player) {
   return true;
 }
 
+function publishResponse(player, response) {
+  if (response) game.responses[player] = response;
+  else delete game.responses[player];
+  io.to('teacher').emit('answer-updated', { player, response });
+  if (game.displayViewRound === game.round) io.to('display').emit('answer-updated', { player, response });
+}
+
 io.on('connection', socket => {
   const clientType = String(socket.handshake.query.type || 'unknown');
   if (['student', 'teacher', 'display'].includes(clientType)) socket.join(clientType);
@@ -308,13 +306,15 @@ io.on('connection', socket => {
     const player = Number(data?.player);
     const width = Number(data?.width);
     const height = Number(data?.height);
+    const autoFinal = data?.autoFinal === true;
+    const submittedRound = Number(data?.round);
     if (!validPlayer(player) || socketPlayers.get(socket.id) !== player) return;
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0 || width > 5000 || height > 5000) return;
-    if (!validStrokes(data?.strokes, width, height)) return;
-
-    const response = { player, round: game.round, strokes: data.strokes, width, height, submittedAt: Date.now() };
+    if (!validStrokes(data?.strokes, width, height, autoFinal)) return;
 
     if (game.phase === 'practice') {
+      if (!data.strokes.length) return;
+      const response = { player, round: game.round, strokes: data.strokes, width, height, submittedAt: Date.now() };
       game.practiceResponses[player] = response;
       io.to('teacher').emit('practice-answer-updated', { player, response });
       io.to('display').emit('answer-updated', { player, response });
@@ -326,20 +326,34 @@ io.on('connection', socket => {
       socket.emit('submit-result', { ok: false, reason: 'eliminated' });
       return;
     }
-    if (game.phase !== 'running' || !game.timerEndAt) {
+    if (submittedRound !== game.round) return;
+
+    const now = Date.now();
+    if (game.phase === 'running' && game.timerEndAt && now >= game.timerEndAt) endAnswering();
+    const normalWindow = game.phase === 'running' && game.timerEndAt && now < game.timerEndAt;
+    const finalWindow = game.phase === 'ended' && autoFinal && game.finalizeGraceUntil && now <= game.finalizeGraceUntil;
+    if (!normalWindow && !finalWindow) {
       socket.emit('submit-result', { ok: false, reason: game.phase === 'ended' ? 'locked' : 'not_started' });
       return;
     }
-    if (Date.now() >= game.timerEndAt) {
-      endAnswering();
-      socket.emit('submit-result', { ok: false, reason: 'locked' });
+
+    if (autoFinal && data.strokes.length === 0) {
+      publishResponse(player, null);
+      socket.emit('submit-result', { ok: true, autoFinal: true, blank: true });
       return;
     }
-    if (Number(data?.round) !== game.round) return;
-    game.responses[player] = response;
-    io.to('teacher').emit('answer-updated', { player, response });
-    if (game.displayViewRound === game.round) io.to('display').emit('answer-updated', { player, response });
-    socket.emit('submit-result', { ok: true });
+
+    const response = {
+      player,
+      round: game.round,
+      strokes: data.strokes,
+      width,
+      height,
+      submittedAt: now,
+      autoFinal
+    };
+    publishResponse(player, response);
+    socket.emit('submit-result', { ok: true, autoFinal });
   });
 
   socket.on('teacher-start-practice', () => {
@@ -387,7 +401,6 @@ io.on('connection', socket => {
     emitStateEvent('paper-style-changed');
   });
 
-  // 公布題目 -> 看題倒數 -> 自動開始正式作答倒數。
   socket.on('teacher-set-question', data => {
     if (clientType !== 'teacher') return;
     if (game.phase !== 'waiting') {
@@ -400,11 +413,11 @@ io.on('connection', socket => {
     if (!Number.isFinite(answerSeconds) || answerSeconds < 5 || answerSeconds > 300) return;
     game.question = String(data?.question || '').slice(0, 200);
     startQuestion(previewSeconds, answerSeconds);
+    socket.emit('question-result', { ok: true });
   });
 
   socket.on('teacher-start-timer', data => {
     if (clientType !== 'teacher') return;
-    if (!['preview', 'running', 'ended'].includes(game.phase)) return;
     const seconds = Math.round(Number(data?.seconds));
     if (!Number.isFinite(seconds) || seconds < 5 || seconds > 300) return;
     restartAnswering(seconds);
@@ -429,8 +442,8 @@ io.on('connection', socket => {
   socket.on('teacher-score-all-submitted', () => {
     if (clientType !== 'teacher') return;
     let count = 0;
-    for (const player of game.eligiblePlayers) {
-      if (game.responses[player] && !hasAward(player) && applyAward(player, 1)) count++;
+    for (let player = 1; player <= 12; player++) {
+      if (isEligible(player) && game.responses[player] && !hasAward(player) && applyAward(player, 1)) count++;
     }
     socket.emit('bulk-score-result', { ok: true, count });
   });
@@ -450,6 +463,12 @@ io.on('connection', socket => {
     sendDisplayState();
   });
 
+  socket.on('teacher-clear-answers', () => {
+    if (clientType !== 'teacher') return;
+    game.responses = {};
+    emitStateEvent('round-changed');
+  });
+
   socket.on('teacher-next-round', () => {
     if (clientType !== 'teacher') return;
     archiveCurrentRound();
@@ -457,7 +476,6 @@ io.on('connection', socket => {
     game.round += 1;
     game.question = '';
     game.responses = {};
-    game.practiceResponses = {};
     game.roundAwards = {};
     game.phase = 'waiting';
     game.locked = true;
@@ -474,12 +492,11 @@ io.on('connection', socket => {
     game.practiceResponses = {};
     game.roundAwards = {};
     game.history = [];
+    game.eligiblePlayers = [...ALL_PLAYERS];
     game.phase = 'waiting';
     game.locked = true;
     game.displayViewRound = 1;
-    game.eligiblePlayers = [...ALL_PLAYERS];
-    game.paperStyle = 'white';
-    for (const i of ALL_PLAYERS) game.scores[i] = 0;
+    for (let i = 1; i <= 12; i++) game.scores[i] = 0;
     emitStateEvent('reset-all');
   });
 
