@@ -17,6 +17,7 @@ const PAPER_STYLES = new Set(['white', 'english', 'chinese']);
 const AUTO_FINAL_GRACE_MS = 1500;
 
 const game = {
+  competitionName: '英文單字競賽',
   round: 1,
   question: '',
   scores: Object.fromEntries(ALL_PLAYERS.map(i => [i, 0])),
@@ -39,9 +40,13 @@ const game = {
 const socketPlayers = new Map();
 
 function historyRounds() { return game.history.map(h => h.round); }
+function validPlayer(n) { return Number.isInteger(n) && n >= 1 && n <= 12; }
+function isEligible(player) { return game.eligiblePlayers.includes(player); }
+function hasAward(player) { return Object.prototype.hasOwnProperty.call(game.roundAwards, player); }
 
 function fullState() {
   return {
+    competitionName: game.competitionName,
     round: game.round,
     question: game.question,
     scores: { ...game.scores },
@@ -64,6 +69,7 @@ function fullState() {
 
 function studentState() {
   return {
+    competitionName: game.competitionName,
     round: game.round,
     question: game.question,
     activePlayers: [...game.activePlayers],
@@ -95,6 +101,7 @@ function displayStateForRound(round) {
   const h = game.history.find(x => x.round === round);
   if (!h) return liveDisplayState();
   return {
+    competitionName: game.competitionName,
     round: h.round,
     question: h.question,
     scores: { ...h.scoresAfterRound },
@@ -122,10 +129,6 @@ function emitStateEvent(eventName) {
   io.to('teacher').emit(eventName, fullState());
   sendDisplayState();
 }
-
-function validPlayer(n) { return Number.isInteger(n) && n >= 1 && n <= 12; }
-function isEligible(player) { return game.eligiblePlayers.includes(player); }
-function hasAward(player) { return Object.prototype.hasOwnProperty.call(game.roundAwards, player); }
 
 function validStrokes(strokes, width, height, allowEmpty = false) {
   if (!Array.isArray(strokes)) return false;
@@ -212,7 +215,7 @@ function restartAnswering(seconds) {
 }
 
 function archiveCurrentRound() {
-  if (!game.question && Object.keys(game.responses).length === 0) return;
+  if (game.phase === 'waiting' && !game.question && Object.keys(game.responses).length === 0) return;
   const existingIndex = game.history.findIndex(h => h.round === game.round);
   const snapshot = {
     round: game.round,
@@ -343,15 +346,7 @@ io.on('connection', socket => {
       return;
     }
 
-    const response = {
-      player,
-      round: game.round,
-      strokes: data.strokes,
-      width,
-      height,
-      submittedAt: now,
-      autoFinal
-    };
+    const response = { player, round: game.round, strokes: data.strokes, width, height, submittedAt: now, autoFinal };
     publishResponse(player, response);
     socket.emit('submit-result', { ok: true, autoFinal });
   });
@@ -374,6 +369,22 @@ io.on('connection', socket => {
     game.locked = true;
     game.practiceResponses = {};
     emitStateEvent('practice-ended');
+  });
+
+  socket.on('teacher-set-competition-name', data => {
+    if (clientType !== 'teacher') return;
+    if (!['waiting', 'practice'].includes(game.phase)) {
+      socket.emit('competition-name-result', { ok: false, reason: 'round_active' });
+      return;
+    }
+    const name = String(data?.name || '').trim().slice(0, 80);
+    if (!name) {
+      socket.emit('competition-name-result', { ok: false, reason: 'empty' });
+      return;
+    }
+    game.competitionName = name;
+    emitStateEvent('competition-name-changed');
+    socket.emit('competition-name-result', { ok: true, name });
   });
 
   socket.on('teacher-set-eligible-players', data => {
@@ -411,9 +422,9 @@ io.on('connection', socket => {
     const answerSeconds = Math.round(Number(data?.answerSeconds ?? game.timerDuration));
     if (!Number.isFinite(previewSeconds) || previewSeconds < 0 || previewSeconds > 30) return;
     if (!Number.isFinite(answerSeconds) || answerSeconds < 5 || answerSeconds > 300) return;
-    game.question = String(data?.question || '').slice(0, 200);
+    game.question = String(data?.question || '').trim().slice(0, 200);
     startQuestion(previewSeconds, answerSeconds);
-    socket.emit('question-result', { ok: true });
+    socket.emit('question-result', { ok: true, oral: !game.question });
   });
 
   socket.on('teacher-start-timer', data => {
