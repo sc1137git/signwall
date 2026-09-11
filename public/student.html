@@ -1,24 +1,148 @@
 <!doctype html>
-<html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"><title>英文單字競賽｜學生端</title><script src="/signwall/socket.io/socket.io.js"></script><style>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>英文單字競賽｜學生端</title>
+<script src="/signwall/socket.io/socket.io.js"></script>
+<style>
 *{box-sizing:border-box;-webkit-user-select:none;user-select:none}html,body{margin:0;width:100%;height:100%;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f5f7fb;color:#172033;touch-action:none}button,input{font:inherit}.app{height:100%;display:flex;flex-direction:column}.top{height:98px;background:#fff;border-bottom:1px solid #dfe5ee;display:flex;align-items:center;gap:14px;padding:10px 16px}.badge{width:58px;height:58px;border-radius:18px;background:#172033;color:#fff;display:grid;place-items:center;font-weight:900;font-size:28px;flex:0 0 auto}.info{min-width:0;flex:1}.title{font-size:14px;color:#6b7280;font-weight:700}.question{font-size:25px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.round{font-size:13px;color:#6b7280;font-weight:800}.timerBox{min-width:108px;text-align:center;font-size:42px;line-height:1;font-weight:1000;color:#2563eb}.timerBox.danger{color:#dc2626}.timerBox.practice{color:#7c3aed;font-size:28px}.timerLabel{display:block;font-size:11px;margin-top:5px;color:#64748b}.canvasWrap{flex:1;margin:10px;background:#fff;border-radius:20px;box-shadow:0 5px 24px rgba(25,45,80,.08);overflow:hidden;position:relative}.canvasWrap.locked{background:#f1f5f9}.canvasWrap canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}.guideCanvas{z-index:0;pointer-events:none}.drawCanvas{z-index:1}.hint{position:absolute;inset:0;z-index:2;display:grid;place-items:center;color:#c1c8d3;font-size:28px;font-weight:800;pointer-events:none}.lockOverlay{position:absolute;inset:0;z-index:4;display:none;place-items:center;background:rgba(241,245,249,.86);font-size:32px;font-weight:950;color:#64748b;pointer-events:none;text-align:center;padding:20px}.canvasWrap.locked .lockOverlay{display:grid}.toolbar{height:88px;background:#fff;border-top:1px solid #dfe5ee;padding:12px 16px;display:flex;gap:12px}.btn{border:0;border-radius:16px;padding:0 24px;font-weight:900;font-size:19px}.secondary{background:#e9edf3;color:#263247}.primary{flex:1;background:#2563eb;color:#fff}.btn:disabled{opacity:.35}.status{position:fixed;top:106px;left:50%;transform:translateX(-50%);padding:9px 16px;border-radius:999px;background:#172033;color:#fff;font-size:14px;opacity:0;transition:.2s;z-index:80;pointer-events:none}.status.show{opacity:1}.picker{position:fixed;inset:0;background:#f5f7fb;z-index:70;display:flex;flex-direction:column;padding:24px}.picker h1{text-align:center;margin:12px 0 4px;font-size:28px}.picker p{text-align:center;color:#6b7280;margin:0 0 22px}.numbers{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;max-width:720px;width:100%;margin:auto}.num{aspect-ratio:1;border:2px solid #d7dce5;background:#fff;border-radius:22px;font-size:34px;font-weight:900;color:#172033}.num.active{border-color:#2563eb;background:#eef4ff}.num.used{opacity:.35;background:#e5e7eb}.num.out{box-shadow:inset 0 -6px #cbd5e1}.num:disabled{cursor:not-allowed}.change{border:0;background:transparent;color:#2563eb;font-weight:800;padding:8px}.submitted{position:absolute;right:12px;top:12px;z-index:3;border-radius:999px;padding:7px 11px;background:#dcfce7;color:#166534;font-weight:800;font-size:13px;display:none}.submitted.show{display:block}.preview{position:fixed;inset:0;z-index:60;background:#172033;color:#fff;display:none;place-items:center;text-align:center;padding:32px}.preview.show{display:grid}.previewInner{width:min(900px,100%)}.previewLabel{font-size:22px;color:#93c5fd;font-weight:900;margin-bottom:20px}.previewQuestion{font-size:clamp(50px,9vw,110px);line-height:1.08;font-weight:1000;word-break:break-word}.previewCount{margin-top:30px;font-size:54px;font-weight:1000;color:#facc15}.previewHint{margin-top:10px;color:#cbd5e1;font-size:18px}
-</style></head><body><div class="app"><div class="top"><div class="badge" id="playerBadge">?</div><div class="info"><div class="title">英文單字競賽</div><div class="question" id="question">等待老師出題…</div><div class="round" id="round">第 1 題</div></div><div class="timerBox" id="timer">--<span class="timerLabel">等待出題</span></div><button class="change" id="changeBtn">換號碼</button></div><div class="canvasWrap locked" id="canvasWrap"><canvas class="guideCanvas" id="guideCanvas"></canvas><canvas class="drawCanvas" id="canvas"></canvas><div class="hint" id="hint">在這裡寫答案</div><div class="submitted" id="submitted">已送出 ✓</div><div class="lockOverlay" id="lockOverlay">等待老師出題</div></div><div class="toolbar"><button class="btn secondary" id="clearBtn" disabled>清除</button><button class="btn primary" id="submitBtn" disabled>送出答案</button></div></div><div class="preview" id="preview"><div class="previewInner"><div class="previewLabel">準備看題</div><div class="previewQuestion" id="previewQuestion"></div><div class="previewCount" id="previewCount"></div><div class="previewHint">倒數結束後才開始作答</div></div></div><div class="status" id="status"></div><div class="picker" id="picker"><h1>我是幾號？</h1><p>灰色＝已有人使用；底線灰色＝目前未晉級</p><div class="numbers" id="numbers"></div></div><script>
-const socket=io(location.origin,{path:'/signwall/socket.io',query:{type:'student'}});const canvas=document.getElementById('canvas'),guideCanvas=document.getElementById('guideCanvas'),ctx=canvas.getContext('2d'),gctx=guideCanvas.getContext('2d'),wrap=document.getElementById('canvasWrap');let player=Number(localStorage.getItem('wordGamePlayer'))||0,strokes=[],current=[],drawing=false,W=800,H=500,round=1,submittedRound=0,state={round:1,question:'',activePlayers:[],eligiblePlayers:[1,2,3,4,5,6,7,8,9,10,11,12],paperStyle:'white',previewEndAt:null,timerEndAt:null,phase:'waiting',locked:true};
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="badge" id="playerBadge">?</div>
+    <div class="info">
+      <div class="title">英文單字競賽</div>
+      <div class="question" id="question">等待老師出題…</div>
+      <div class="round" id="round">第 1 題</div>
+    </div>
+    <div class="timerBox" id="timer">--<span class="timerLabel">等待出題</span></div>
+    <button class="change" id="changeBtn">換號碼</button>
+  </div>
+  <div class="canvasWrap locked" id="canvasWrap">
+    <canvas class="guideCanvas" id="guideCanvas"></canvas>
+    <canvas class="drawCanvas" id="canvas"></canvas>
+    <div class="hint" id="hint">在這裡寫答案</div>
+    <div class="submitted" id="submitted">已送出 ✓</div>
+    <div class="lockOverlay" id="lockOverlay">等待老師出題</div>
+  </div>
+  <div class="toolbar">
+    <button class="btn secondary" id="clearBtn" disabled>清除</button>
+    <button class="btn primary" id="submitBtn" disabled>送出答案</button>
+  </div>
+</div>
+<div class="preview" id="preview"><div class="previewInner"><div class="previewLabel">準備看題</div><div class="previewQuestion" id="previewQuestion"></div><div class="previewCount" id="previewCount"></div><div class="previewHint">倒數結束後才開始作答</div></div></div>
+<div class="status" id="status"></div>
+<div class="picker" id="picker"><h1>我是幾號？</h1><p>灰色＝已有人使用；底線灰色＝目前未晉級</p><div class="numbers" id="numbers"></div></div>
+<script>
+const socket=io(location.origin,{path:'/signwall/socket.io',query:{type:'student'}});
+const canvas=document.getElementById('canvas'),guideCanvas=document.getElementById('guideCanvas'),ctx=canvas.getContext('2d'),gctx=guideCanvas.getContext('2d'),wrap=document.getElementById('canvasWrap');
+let player=Number(localStorage.getItem('wordGamePlayer'))||0,strokes=[],current=[],drawing=false,W=800,H=500,round=1,submittedRound=0,autoFinalSentRound=0;
+let state={round:1,question:'',activePlayers:[],eligiblePlayers:[1,2,3,4,5,6,7,8,9,10,11,12],paperStyle:'white',previewEndAt:null,timerEndAt:null,phase:'waiting',locked:true};
+
 function toast(t,bg='#172033'){const el=document.getElementById('status');el.textContent=t;el.style.background=bg;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),1800)}
 function eligible(){return !!player&&(state.eligiblePlayers||[]).includes(player)}
 function canDraw(){if(!player)return false;if(state.phase==='practice')return true;return eligible()&&state.phase==='running'&&!!state.timerEndAt&&Date.now()<state.timerEndAt&&!state.locked}
 function buildPicker(active=[]){const box=document.getElementById('numbers');box.innerHTML='';for(let i=1;i<=12;i++){const used=active.includes(i)&&i!==player,out=!(state.eligiblePlayers||[]).includes(i),b=document.createElement('button');b.className='num'+(i===player?' active':'')+(used?' used':'')+(out?' out':'');b.textContent=i;b.disabled=used;b.onclick=()=>choose(i);box.appendChild(b)}}
 function choose(n){if(!socket.connected)return toast('尚未連上伺服器','#b45309');socket.emit('player-select',{player:n})}
 document.getElementById('changeBtn').onclick=()=>{document.getElementById('picker').style.display='flex';buildPicker(state.activePlayers||[])};
-function applyState(s){const oldRound=round,oldPaper=state.paperStyle;state={...state,...s};round=state.round||1;document.getElementById('question').textContent=state.phase==='practice'?'連線測試／練習':state.question||'等待老師出題…';document.getElementById('round').textContent=state.phase==='practice'?'練習模式':`第 ${round} 題`;buildPicker(state.activePlayers||[]);if(player&&socket.connected)socket.emit('player-select',{player});else if(!player)document.getElementById('picker').style.display='flex';if(oldRound!==round)clearAll(true);if(oldPaper!==state.paperStyle)drawGuide();updateUI()}
-function updateUI(){const allowed=canDraw(),timer=document.getElementById('timer'),lock=document.getElementById('lockOverlay'),preview=document.getElementById('preview');preview.classList.toggle('show',state.phase==='preview');timer.classList.remove('danger','practice');if(state.phase==='practice'){timer.innerHTML=`練習<span class="timerLabel">連線測試</span>`;timer.classList.add('practice');lock.textContent='連線練習中'}else if(state.phase==='preview'){const left=Math.max(0,Math.ceil(((state.previewEndAt||Date.now())-Date.now())/1000));document.getElementById('previewQuestion').textContent=state.question||'請聽老師念題';document.getElementById('previewCount').textContent=left>0?`${left}`:'開始！';timer.innerHTML=`${left}<span class="timerLabel">看題</span>`;lock.textContent='看題中，尚未開放作答'}else if(!eligible()&&player){timer.innerHTML=`--<span class="timerLabel">未晉級</span>`;lock.textContent='本輪未晉級'}else if(state.phase==='running'){const left=Math.max(0,Math.ceil(((state.timerEndAt||Date.now())-Date.now())/1000));timer.innerHTML=`${left}<span class="timerLabel">秒</span>`;timer.classList.toggle('danger',left<=5);lock.textContent='作答中'}else if(state.phase==='ended'){timer.innerHTML=`0<span class="timerLabel">時間到</span>`;timer.classList.add('danger');lock.textContent='時間到，答案已鎖定'}else{timer.innerHTML=`--<span class="timerLabel">等待出題</span>`;lock.textContent=player?'等待老師出題':'請先選擇號碼'}wrap.classList.toggle('locked',!allowed);document.getElementById('clearBtn').disabled=!allowed;document.getElementById('submitBtn').disabled=!allowed||(!strokes.length&&!current.length);if(!allowed)drawing=false}
-function drawGuide(){const dpr=devicePixelRatio||1;guideCanvas.width=W*dpr;guideCanvas.height=H*dpr;guideCanvas.style.width=W+'px';guideCanvas.style.height=H+'px';gctx.setTransform(dpr,0,0,dpr,0,0);gctx.clearRect(0,0,W,H);if(state.paperStyle==='white')return;if(state.paperStyle==='english'){const ys=[H*.2,H*.4,H*.6,H*.8];gctx.strokeStyle='#93b4d7';gctx.lineWidth=1.5;ys.forEach((y,idx)=>{gctx.setLineDash(idx===1||idx===2?[9,8]:[]);gctx.beginPath();gctx.moveTo(18,y);gctx.lineTo(W-18,y);gctx.stroke()});gctx.setLineDash([]);return}if(state.paperStyle==='chinese'){const size=Math.max(72,Math.min(H*.72,W/6)),count=Math.max(1,Math.min(6,Math.floor((W-24)/size))),total=count*size,startX=(W-total)/2,startY=(H-size)/2;gctx.strokeStyle='#d5a0a0';gctx.lineWidth=1.5;for(let i=0;i<count;i++){const x=startX+i*size;gctx.setLineDash([]);gctx.strokeRect(x,startY,size,size);gctx.setLineDash([8,7]);gctx.beginPath();gctx.moveTo(x+size/2,startY);gctx.lineTo(x+size/2,startY+size);gctx.moveTo(x,startY+size/2);gctx.lineTo(x+size,startY+size/2);gctx.stroke()}gctx.setLineDash([])}}
-setInterval(updateUI,150);
-socket.on('connect',()=>{toast('已連線','#15803d');socket.emit('state-request')});['game-state','preview-started','answer-started','timer-ended','round-changed','reset-all','practice-started','practice-ended','participants-changed','paper-style-changed'].forEach(ev=>socket.on(ev,s=>{applyState(s);if(['preview-started','round-changed','reset-all','practice-started','practice-ended'].includes(ev))clearAll(true)}));socket.on('active-players',a=>{state.activePlayers=a;buildPicker(a)});socket.on('player-select-result',r=>{if(r.ok){player=r.player;localStorage.setItem('wordGamePlayer',player);document.getElementById('playerBadge').textContent=player;document.getElementById('picker').style.display='none';buildPicker(state.activePlayers||[]);updateUI()}else{if(player===r.player){player=0;localStorage.removeItem('wordGamePlayer');document.getElementById('playerBadge').textContent='?'}document.getElementById('picker').style.display='flex';buildPicker(state.activePlayers||[]);toast(`${r.player} 號已有人使用，請選其他號碼`,'#b91c1c')}});socket.on('submit-result',r=>{if(r.ok){submittedRound=round;document.getElementById('submitted').classList.add('show');toast(r.practice?'練習筆跡已成功送出':'答案已送到大螢幕','#15803d')}else if(r.reason==='locked')toast('時間到，不能再送出','#b91c1c');else if(r.reason==='eliminated')toast('本輪未晉級，不能作答','#b45309');else if(r.reason==='not_started')toast('還沒開始作答','#b45309')});socket.on('disconnect',()=>toast('連線中斷','#b45309'));
+
+function answerSnapshot(){
+  const copy=strokes.map(stroke=>stroke.map(p=>({x:p.x,y:p.y})));
+  if(current.length)copy.push(current.map(p=>({x:p.x,y:p.y})));
+  return copy;
+}
+
+function autoFinalize(){
+  if(!player||!eligible()||autoFinalSentRound===round)return false;
+  autoFinalSentRound=round;
+  const snapshot=answerSnapshot();
+  socket.emit('submit-answer',{player,round,strokes:snapshot,width:W,height:H,autoFinal:true});
+  drawing=false;
+  current=[];
+  return true;
+}
+
+function applyState(s){
+  const oldRound=round,oldPaper=state.paperStyle;
+  state={...state,...s};round=state.round||1;
+  document.getElementById('question').textContent=state.phase==='practice'?'連線測試／練習':state.question||'等待老師出題…';
+  document.getElementById('round').textContent=state.phase==='practice'?'練習模式':`第 ${round} 題`;
+  buildPicker(state.activePlayers||[]);
+  if(player&&socket.connected)socket.emit('player-select',{player});else if(!player)document.getElementById('picker').style.display='flex';
+  if(oldRound!==round){clearAll(true);autoFinalSentRound=0}
+  if(oldPaper!==state.paperStyle)drawGuide();
+  updateUI();
+}
+
+function updateUI(){
+  if(state.phase==='running'&&state.timerEndAt&&Date.now()>=state.timerEndAt)autoFinalize();
+  const allowed=canDraw(),timer=document.getElementById('timer'),lock=document.getElementById('lockOverlay'),preview=document.getElementById('preview');
+  preview.classList.toggle('show',state.phase==='preview');timer.classList.remove('danger','practice');
+  if(state.phase==='practice'){
+    timer.innerHTML=`練習<span class="timerLabel">連線測試</span>`;timer.classList.add('practice');lock.textContent='連線練習中';
+  }else if(state.phase==='preview'){
+    const left=Math.max(0,Math.ceil(((state.previewEndAt||Date.now())-Date.now())/1000));
+    document.getElementById('previewQuestion').textContent=state.question||'請聽老師念題';document.getElementById('previewCount').textContent=left>0?`${left}`:'開始！';timer.innerHTML=`${left}<span class="timerLabel">看題</span>`;lock.textContent='看題中，尚未開放作答';
+  }else if(!eligible()&&player){
+    timer.innerHTML=`--<span class="timerLabel">未晉級</span>`;lock.textContent='本輪未晉級';
+  }else if(state.phase==='running'){
+    const left=Math.max(0,Math.ceil(((state.timerEndAt||Date.now())-Date.now())/1000));timer.innerHTML=`${left}<span class="timerLabel">秒</span>`;timer.classList.toggle('danger',left<=5);lock.textContent=left===0?'自動收卷中…':'作答中';
+  }else if(state.phase==='ended'){
+    timer.innerHTML=`0<span class="timerLabel">時間到</span>`;timer.classList.add('danger');lock.textContent='時間到，已自動收卷';
+  }else{
+    timer.innerHTML=`--<span class="timerLabel">等待出題</span>`;lock.textContent=player?'等待老師出題':'請先選擇號碼';
+  }
+  wrap.classList.toggle('locked',!allowed);document.getElementById('clearBtn').disabled=!allowed;document.getElementById('submitBtn').disabled=!allowed||(!strokes.length&&!current.length);if(!allowed)drawing=false;
+}
+
+function drawGuide(){
+  const dpr=devicePixelRatio||1;guideCanvas.width=W*dpr;guideCanvas.height=H*dpr;guideCanvas.style.width=W+'px';guideCanvas.style.height=H+'px';gctx.setTransform(dpr,0,0,dpr,0,0);gctx.clearRect(0,0,W,H);
+  if(state.paperStyle==='white')return;
+  if(state.paperStyle==='english'){
+    const ys=[H*.2,H*.4,H*.6,H*.8];gctx.strokeStyle='#93b4d7';gctx.lineWidth=1.5;
+    ys.forEach((y,idx)=>{gctx.setLineDash(idx===1||idx===2?[9,8]:[]);gctx.beginPath();gctx.moveTo(18,y);gctx.lineTo(W-18,y);gctx.stroke()});gctx.setLineDash([]);return;
+  }
+  if(state.paperStyle==='chinese'){
+    const size=Math.max(180,Math.min(H*.78,W*.78,560)),x=(W-size)/2,y=(H-size)/2;
+    gctx.strokeStyle='#d5a0a0';gctx.lineWidth=2;gctx.setLineDash([]);gctx.strokeRect(x,y,size,size);
+    gctx.setLineDash([10,8]);gctx.beginPath();gctx.moveTo(x+size/2,y);gctx.lineTo(x+size/2,y+size);gctx.moveTo(x,y+size/2);gctx.lineTo(x+size,y+size/2);gctx.stroke();gctx.setLineDash([]);
+  }
+}
+
+setInterval(updateUI,100);
+socket.on('connect',()=>{toast('已連線','#15803d');socket.emit('state-request')});
+socket.on('game-state',applyState);
+socket.on('preview-started',s=>{applyState(s);clearAll(true);autoFinalSentRound=0;toast('請看題目','#7c3aed')});
+socket.on('answer-started',s=>{applyState(s);autoFinalSentRound=0;toast('開始作答！','#2563eb')});
+socket.on('timer-ended',s=>{const sent=autoFinalize();applyState(s);toast(sent?'時間到，已自動收卷':'時間到','#b91c1c')});
+socket.on('round-changed',s=>{applyState(s);clearAll(true);autoFinalSentRound=0;toast('準備下一題','#2563eb')});
+socket.on('reset-all',s=>{applyState(s);clearAll(true);autoFinalSentRound=0;toast('比賽已重置')});
+socket.on('practice-started',s=>{applyState(s);clearAll(true);autoFinalSentRound=0;toast('連線練習開始','#7c3aed')});
+socket.on('practice-ended',s=>{applyState(s);clearAll(true);toast('練習結束','#475569')});
+socket.on('participants-changed',applyState);socket.on('paper-style-changed',applyState);
+socket.on('active-players',a=>{state.activePlayers=a;buildPicker(a)});
+socket.on('player-select-result',r=>{if(r.ok){player=r.player;localStorage.setItem('wordGamePlayer',player);document.getElementById('playerBadge').textContent=player;document.getElementById('picker').style.display='none';buildPicker(state.activePlayers||[]);updateUI()}else{if(player===r.player){player=0;localStorage.removeItem('wordGamePlayer');document.getElementById('playerBadge').textContent='?'}document.getElementById('picker').style.display='flex';buildPicker(state.activePlayers||[]);toast(`${r.player} 號已有人使用，請選其他號碼`,'#b91c1c')}});
+socket.on('submit-result',r=>{
+  if(r.ok){submittedRound=round;const badge=document.getElementById('submitted');badge.textContent=r.autoFinal?'已自動收卷 ✓':'已送出 ✓';badge.classList.add('show');if(!r.autoFinal)toast(r.practice?'練習筆跡已成功送出':'答案已送到老師與大螢幕','#15803d')}
+  else if(r.reason==='locked')toast('時間到，答案已鎖定','#b91c1c');else if(r.reason==='eliminated')toast('本輪未晉級，不能作答','#b45309');else if(r.reason==='not_started')toast('還沒開始作答','#b45309');
+});
+socket.on('disconnect',()=>toast('連線中斷','#b45309'));
+
 function resize(){const r=wrap.getBoundingClientRect(),dpr=devicePixelRatio||1;W=Math.max(100,Math.floor(r.width));H=Math.max(100,Math.floor(r.height));canvas.width=W*dpr;canvas.height=H*dpr;canvas.style.width=W+'px';canvas.style.height=H+'px';ctx.setTransform(dpr,0,0,dpr,0,0);ctx.strokeStyle='#111827';ctx.lineWidth=4;ctx.lineCap='round';ctx.lineJoin='round';drawGuide();redraw()}
 function pos(e){const r=canvas.getBoundingClientRect();return{x:(e.clientX-r.left)*W/r.width,y:(e.clientY-r.top)*H/r.height}}
 function line(points){if(points.length<2)return;ctx.beginPath();ctx.moveTo(points[0].x,points[0].y);for(let i=1;i<points.length;i++)ctx.lineTo(points[i].x,points[i].y);ctx.stroke()}
 function redraw(){ctx.clearRect(0,0,W,H);strokes.forEach(line);if(current.length)line(current);document.getElementById('hint').style.display=strokes.length||current.length?'none':'grid';updateUI()}
-canvas.addEventListener('pointerdown',e=>{if(!canDraw())return;e.preventDefault();drawing=true;current=[pos(e)];canvas.setPointerCapture?.(e.pointerId);redraw()});canvas.addEventListener('pointermove',e=>{if(!drawing||!canDraw())return;e.preventDefault();current.push(pos(e));redraw()});function end(e){if(!drawing)return;e.preventDefault();drawing=false;if(canDraw()&&current.length)strokes.push(current);current=[];redraw()}canvas.addEventListener('pointerup',end);canvas.addEventListener('pointercancel',end);
-function clearAll(force=false){if(!force&&!canDraw())return;strokes=[];current=[];drawing=false;submittedRound=0;document.getElementById('submitted').classList.remove('show');redraw()}
-document.getElementById('clearBtn').onclick=()=>clearAll(false);document.getElementById('submitBtn').onclick=()=>{if(!canDraw())return toast('現在不能送出','#b91c1c');if(!player)return document.getElementById('picker').style.display='flex';if(current.length){strokes.push(current);current=[]}if(!strokes.length)return;socket.emit('submit-answer',{player,round,strokes,width:W,height:H})};window.addEventListener('resize',resize);resize();if(player)document.getElementById('playerBadge').textContent=player;else document.getElementById('picker').style.display='flex';
-</script></body></html>
+canvas.addEventListener('pointerdown',e=>{if(!canDraw())return;e.preventDefault();drawing=true;current=[pos(e)];canvas.setPointerCapture?.(e.pointerId);redraw()});
+canvas.addEventListener('pointermove',e=>{if(!drawing||!canDraw())return;e.preventDefault();current.push(pos(e));redraw()});
+function end(e){if(!drawing)return;e.preventDefault();drawing=false;if(canDraw()&&current.length)strokes.push(current);current=[];redraw()}
+canvas.addEventListener('pointerup',end);canvas.addEventListener('pointercancel',end);
+function clearAll(force=false){if(!force&&!canDraw())return;strokes=[];current=[];drawing=false;submittedRound=0;const badge=document.getElementById('submitted');badge.classList.remove('show');badge.textContent='已送出 ✓';redraw()}
+document.getElementById('clearBtn').onclick=()=>clearAll(false);
+document.getElementById('submitBtn').onclick=()=>{if(!canDraw())return toast('現在不能送出','#b91c1c');if(!player)return document.getElementById('picker').style.display='flex';const snapshot=answerSnapshot();if(!snapshot.length)return;socket.emit('submit-answer',{player,round,strokes:snapshot,width:W,height:H})};
+window.addEventListener('resize',resize);resize();if(player)document.getElementById('playerBadge').textContent=player;else document.getElementById('picker').style.display='flex';
+</script>
+</body>
+</html>
