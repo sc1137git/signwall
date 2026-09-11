@@ -1,530 +1,60 @@
-const express = require('express');
-const http = require('http');
-const path = require('path');
-const { Server } = require('socket.io');
-
-const app = express();
-const server = http.createServer(app);
-const BASE_PATH = '/signwall';
-const io = new Server(server, { cors: { origin: '*' }, path: `${BASE_PATH}/socket.io` });
-const PORT = process.env.PORT || 3000;
-app.use(BASE_PATH, express.static(path.join(__dirname, 'public')));
-
-let signatureCount = 0;
-let timerHandle = null;
-const ALL_PLAYERS = Array.from({ length: 12 }, (_, i) => i + 1);
-const PAPER_STYLES = new Set(['white', 'english', 'chinese']);
-const AUTO_FINAL_GRACE_MS = 1500;
-
-const game = {
-  competitionName: '英文單字競賽',
-  round: 1,
-  question: '',
-  scores: Object.fromEntries(ALL_PLAYERS.map(i => [i, 0])),
-  responses: {},
-  practiceResponses: {},
-  roundAwards: {},
-  history: [],
-  activePlayers: [],
-  eligiblePlayers: [...ALL_PLAYERS],
-  paperStyle: 'white',
-  previewDuration: 3,
-  previewEndAt: null,
-  timerDuration: 30,
-  timerEndAt: null,
-  finalizeGraceUntil: null,
-  phase: 'waiting', // waiting | practice | preview | running | ended
-  locked: true,
-  displayViewRound: 1
-};
-const socketPlayers = new Map();
-
-function historyRounds() { return game.history.map(h => h.round); }
-function validPlayer(n) { return Number.isInteger(n) && n >= 1 && n <= 12; }
-function isEligible(player) { return game.eligiblePlayers.includes(player); }
-function hasAward(player) { return Object.prototype.hasOwnProperty.call(game.roundAwards, player); }
-
-function fullState() {
-  return {
-    competitionName: game.competitionName,
-    round: game.round,
-    question: game.question,
-    scores: { ...game.scores },
-    responses: { ...game.responses },
-    practiceResponses: { ...game.practiceResponses },
-    roundAwards: { ...game.roundAwards },
-    activePlayers: [...game.activePlayers],
-    eligiblePlayers: [...game.eligiblePlayers],
-    paperStyle: game.paperStyle,
-    previewDuration: game.previewDuration,
-    previewEndAt: game.previewEndAt,
-    timerDuration: game.timerDuration,
-    timerEndAt: game.timerEndAt,
-    phase: game.phase,
-    locked: game.locked,
-    historyRounds: historyRounds(),
-    displayViewRound: game.displayViewRound
-  };
-}
-
-function studentState() {
-  return {
-    competitionName: game.competitionName,
-    round: game.round,
-    question: game.question,
-    activePlayers: [...game.activePlayers],
-    eligiblePlayers: [...game.eligiblePlayers],
-    paperStyle: game.paperStyle,
-    previewDuration: game.previewDuration,
-    previewEndAt: game.previewEndAt,
-    timerDuration: game.timerDuration,
-    timerEndAt: game.timerEndAt,
-    phase: game.phase,
-    locked: game.locked
-  };
-}
-
-function liveDisplayState() {
-  const practice = game.phase === 'practice';
-  return {
-    ...fullState(),
-    responses: practice ? { ...game.practiceResponses } : { ...game.responses },
-    eligiblePlayers: practice ? [...ALL_PLAYERS] : [...game.eligiblePlayers],
-    practiceMode: practice,
-    viewingHistory: false,
-    currentRound: game.round
-  };
-}
-
-function displayStateForRound(round) {
-  if (round === game.round) return liveDisplayState();
-  const h = game.history.find(x => x.round === round);
-  if (!h) return liveDisplayState();
-  return {
-    competitionName: game.competitionName,
-    round: h.round,
-    question: h.question,
-    scores: { ...h.scoresAfterRound },
-    responses: JSON.parse(JSON.stringify(h.responses || {})),
-    roundAwards: { ...(h.roundAwards || {}) },
-    eligiblePlayers: [...(h.eligiblePlayers || ALL_PLAYERS)],
-    paperStyle: h.paperStyle || 'white',
-    previewDuration: h.previewDuration ?? game.previewDuration,
-    previewEndAt: null,
-    timerDuration: h.timerDuration || game.timerDuration,
-    timerEndAt: null,
-    phase: 'history',
-    locked: true,
-    practiceMode: false,
-    viewingHistory: true,
-    currentRound: game.round,
-    displayViewRound: h.round
-  };
-}
-
-function currentDisplayState() { return displayStateForRound(game.displayViewRound); }
-function sendDisplayState() { io.to('display').emit('display-state', currentDisplayState()); }
-function emitStateEvent(eventName) {
-  io.to('student').emit(eventName, studentState());
-  io.to('teacher').emit(eventName, fullState());
-  sendDisplayState();
-}
-
-function validStrokes(strokes, width, height, allowEmpty = false) {
-  if (!Array.isArray(strokes)) return false;
-  if (!allowEmpty && strokes.length === 0) return false;
-  if (strokes.length > 120) return false;
-  let totalPoints = 0;
-  for (const stroke of strokes) {
-    if (!Array.isArray(stroke) || stroke.length === 0 || stroke.length > 2500) return false;
-    totalPoints += stroke.length;
-    if (totalPoints > 20000) return false;
-    for (const p of stroke) {
-      if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return false;
-      if (p.x < 0 || p.y < 0 || p.x > width || p.y > height) return false;
-    }
-  }
-  return true;
-}
-
-function updateActivePlayers() {
-  const active = new Set();
-  for (const p of socketPlayers.values()) if (validPlayer(p)) active.add(p);
-  game.activePlayers = [...active].sort((a, b) => a - b);
-  io.to('student').emit('active-players', game.activePlayers);
-  io.to('teacher').emit('active-players', game.activePlayers);
-}
-
-function clearRoundTimer() {
-  if (timerHandle) clearTimeout(timerHandle);
-  timerHandle = null;
-  game.previewEndAt = null;
-  game.timerEndAt = null;
-  game.finalizeGraceUntil = null;
-}
-
-function endAnswering() {
-  if (game.phase !== 'running') return;
-  game.phase = 'ended';
-  game.locked = true;
-  game.timerEndAt = Date.now();
-  game.finalizeGraceUntil = Date.now() + AUTO_FINAL_GRACE_MS;
-  timerHandle = null;
-  emitStateEvent('timer-ended');
-}
-
-function beginAnswering() {
-  if (game.phase !== 'preview') return;
-  game.phase = 'running';
-  game.locked = false;
-  game.previewEndAt = null;
-  game.finalizeGraceUntil = null;
-  game.timerEndAt = Date.now() + game.timerDuration * 1000;
-  timerHandle = setTimeout(endAnswering, game.timerDuration * 1000);
-  emitStateEvent('answer-started');
-}
-
-function startQuestion(previewSeconds, answerSeconds) {
-  clearRoundTimer();
-  game.practiceResponses = {};
-  game.previewDuration = previewSeconds;
-  game.timerDuration = answerSeconds;
-  game.locked = true;
-  game.displayViewRound = game.round;
-  if (previewSeconds <= 0) {
-    game.phase = 'preview';
-    beginAnswering();
-    return;
-  }
-  game.phase = 'preview';
-  game.previewEndAt = Date.now() + previewSeconds * 1000;
-  game.timerEndAt = null;
-  timerHandle = setTimeout(beginAnswering, previewSeconds * 1000);
-  emitStateEvent('preview-started');
-}
-
-function restartAnswering(seconds) {
-  clearRoundTimer();
-  game.timerDuration = seconds;
-  game.phase = 'running';
-  game.locked = false;
-  game.timerEndAt = Date.now() + seconds * 1000;
-  timerHandle = setTimeout(endAnswering, seconds * 1000);
-  game.displayViewRound = game.round;
-  emitStateEvent('answer-started');
-}
-
-function archiveCurrentRound() {
-  if (game.phase === 'waiting' && !game.question && Object.keys(game.responses).length === 0) return;
-  const existingIndex = game.history.findIndex(h => h.round === game.round);
-  const snapshot = {
-    round: game.round,
-    question: game.question,
-    responses: JSON.parse(JSON.stringify(game.responses)),
-    roundAwards: { ...game.roundAwards },
-    scoresAfterRound: { ...game.scores },
-    eligiblePlayers: [...game.eligiblePlayers],
-    paperStyle: game.paperStyle,
-    previewDuration: game.previewDuration,
-    timerDuration: game.timerDuration,
-    endedAt: Date.now()
-  };
-  if (existingIndex >= 0) game.history[existingIndex] = snapshot;
-  else game.history.push(snapshot);
-  if (game.history.length > 100) game.history.shift();
-}
-
-function emitScore(player, appliedDelta, awardDelta, animate = true) {
-  const payload = { player, score: game.scores[player], delta: appliedDelta, awardDelta, animate };
-  io.to('teacher').emit('score-updated', payload);
-  if (game.displayViewRound === game.round) io.to('display').emit('score-updated', payload);
-}
-
-function applyAward(player, delta) {
-  if (!validPlayer(player) || !isEligible(player) || hasAward(player)) return false;
-  const oldScore = game.scores[player] || 0;
-  game.scores[player] = Math.max(0, oldScore + delta);
-  const appliedDelta = game.scores[player] - oldScore;
-  game.roundAwards[player] = delta;
-  emitScore(player, appliedDelta, delta, true);
-  return true;
-}
-
-function clearAward(player) {
-  if (!validPlayer(player) || !hasAward(player)) return false;
-  const awardDelta = Number(game.roundAwards[player]) || 0;
-  const oldScore = game.scores[player] || 0;
-  game.scores[player] = Math.max(0, oldScore - awardDelta);
-  const appliedDelta = game.scores[player] - oldScore;
-  delete game.roundAwards[player];
-  io.to('teacher').emit('award-cleared', { player, score: game.scores[player] });
-  if (game.displayViewRound === game.round && appliedDelta !== 0) {
-    io.to('display').emit('score-updated', { player, score: game.scores[player], delta: appliedDelta, awardDelta: null, animate: false });
-  }
-  return true;
-}
-
-function publishResponse(player, response) {
-  if (response) game.responses[player] = response;
-  else delete game.responses[player];
-  io.to('teacher').emit('answer-updated', { player, response });
-  if (game.displayViewRound === game.round) io.to('display').emit('answer-updated', { player, response });
-}
-
-io.on('connection', socket => {
-  const clientType = String(socket.handshake.query.type || 'unknown');
-  if (['student', 'teacher', 'display'].includes(clientType)) socket.join(clientType);
-  console.log(`[連線] ${socket.id} (${clientType})`);
-
-  if (clientType === 'display') socket.emit('display-state', currentDisplayState());
-  else socket.emit('game-state', clientType === 'student' ? studentState() : fullState());
-
-  socket.on('new-signature', data => {
-    if (!data || !Array.isArray(data.strokes) || !data.strokes.length) return;
-    signatureCount++;
-    socket.broadcast.emit('new-signature', data);
-  });
-
-  socket.on('state-request', () => {
-    if (clientType === 'display') socket.emit('display-state', currentDisplayState());
-    else socket.emit('game-state', clientType === 'student' ? studentState() : fullState());
-  });
-
-  socket.on('player-select', data => {
-    if (clientType !== 'student') return;
-    const player = Number(data?.player);
-    if (!validPlayer(player)) return;
-    const occupied = [...socketPlayers.entries()].some(([socketId, p]) => socketId !== socket.id && p === player);
-    if (occupied) {
-      socket.emit('player-select-result', { ok: false, player, reason: 'occupied' });
-      return;
-    }
-    socketPlayers.set(socket.id, player);
-    updateActivePlayers();
-    socket.emit('player-select-result', { ok: true, player });
-  });
-
-  socket.on('submit-answer', data => {
-    if (clientType !== 'student') return;
-    const player = Number(data?.player);
-    const width = Number(data?.width);
-    const height = Number(data?.height);
-    const autoFinal = data?.autoFinal === true;
-    const submittedRound = Number(data?.round);
-    if (!validPlayer(player) || socketPlayers.get(socket.id) !== player) return;
-    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0 || width > 5000 || height > 5000) return;
-    if (!validStrokes(data?.strokes, width, height, autoFinal)) return;
-
-    if (game.phase === 'practice') {
-      if (!data.strokes.length) return;
-      const response = { player, round: game.round, strokes: data.strokes, width, height, submittedAt: Date.now() };
-      game.practiceResponses[player] = response;
-      io.to('teacher').emit('practice-answer-updated', { player, response });
-      io.to('display').emit('answer-updated', { player, response });
-      socket.emit('submit-result', { ok: true, practice: true });
-      return;
-    }
-
-    if (!isEligible(player)) {
-      socket.emit('submit-result', { ok: false, reason: 'eliminated' });
-      return;
-    }
-    if (submittedRound !== game.round) return;
-
-    const now = Date.now();
-    if (game.phase === 'running' && game.timerEndAt && now >= game.timerEndAt) endAnswering();
-    const normalWindow = game.phase === 'running' && game.timerEndAt && now < game.timerEndAt;
-    const finalWindow = game.phase === 'ended' && autoFinal && game.finalizeGraceUntil && now <= game.finalizeGraceUntil;
-    if (!normalWindow && !finalWindow) {
-      socket.emit('submit-result', { ok: false, reason: game.phase === 'ended' ? 'locked' : 'not_started' });
-      return;
-    }
-
-    if (autoFinal && data.strokes.length === 0) {
-      publishResponse(player, null);
-      socket.emit('submit-result', { ok: true, autoFinal: true, blank: true });
-      return;
-    }
-
-    const response = { player, round: game.round, strokes: data.strokes, width, height, submittedAt: now, autoFinal };
-    publishResponse(player, response);
-    socket.emit('submit-result', { ok: true, autoFinal });
-  });
-
-  socket.on('teacher-start-practice', () => {
-    if (clientType !== 'teacher') return;
-    clearRoundTimer();
-    game.phase = 'practice';
-    game.locked = false;
-    game.question = '';
-    game.practiceResponses = {};
-    game.displayViewRound = game.round;
-    emitStateEvent('practice-started');
-  });
-
-  socket.on('teacher-end-practice', () => {
-    if (clientType !== 'teacher') return;
-    clearRoundTimer();
-    game.phase = 'waiting';
-    game.locked = true;
-    game.practiceResponses = {};
-    emitStateEvent('practice-ended');
-  });
-
-  socket.on('teacher-set-competition-name', data => {
-    if (clientType !== 'teacher') return;
-    if (!['waiting', 'practice'].includes(game.phase)) {
-      socket.emit('competition-name-result', { ok: false, reason: 'round_active' });
-      return;
-    }
-    const name = String(data?.name || '').trim().slice(0, 80);
-    if (!name) {
-      socket.emit('competition-name-result', { ok: false, reason: 'empty' });
-      return;
-    }
-    game.competitionName = name;
-    emitStateEvent('competition-name-changed');
-    socket.emit('competition-name-result', { ok: true, name });
-  });
-
-  socket.on('teacher-set-eligible-players', data => {
-    if (clientType !== 'teacher') return;
-    if (!['waiting', 'practice'].includes(game.phase)) {
-      socket.emit('participants-result', { ok: false, reason: 'round_active' });
-      return;
-    }
-    const raw = Array.isArray(data?.players) ? data.players.map(Number) : [];
-    const players = [...new Set(raw.filter(validPlayer))].sort((a, b) => a - b);
-    if (players.length < 1) {
-      socket.emit('participants-result', { ok: false, reason: 'empty' });
-      return;
-    }
-    game.eligiblePlayers = players;
-    emitStateEvent('participants-changed');
-    socket.emit('participants-result', { ok: true, count: players.length });
-  });
-
-  socket.on('teacher-set-paper-style', data => {
-    if (clientType !== 'teacher') return;
-    const style = String(data?.style || 'white');
-    if (!PAPER_STYLES.has(style)) return;
-    game.paperStyle = style;
-    emitStateEvent('paper-style-changed');
-  });
-
-  socket.on('teacher-set-question', data => {
-    if (clientType !== 'teacher') return;
-    if (game.phase !== 'waiting') {
-      socket.emit('question-result', { ok: false, reason: 'not_waiting' });
-      return;
-    }
-    const previewSeconds = Math.round(Number(data?.previewSeconds ?? game.previewDuration));
-    const answerSeconds = Math.round(Number(data?.answerSeconds ?? game.timerDuration));
-    if (!Number.isFinite(previewSeconds) || previewSeconds < 0 || previewSeconds > 30) return;
-    if (!Number.isFinite(answerSeconds) || answerSeconds < 5 || answerSeconds > 300) return;
-    game.question = String(data?.question || '').trim().slice(0, 200);
-    startQuestion(previewSeconds, answerSeconds);
-    socket.emit('question-result', { ok: true, oral: !game.question });
-  });
-
-  socket.on('teacher-start-timer', data => {
-    if (clientType !== 'teacher') return;
-    const seconds = Math.round(Number(data?.seconds));
-    if (!Number.isFinite(seconds) || seconds < 5 || seconds > 300) return;
-    restartAnswering(seconds);
-  });
-
-  socket.on('teacher-score', data => {
-    if (clientType !== 'teacher') return;
-    const player = Number(data?.player);
-    const delta = Number(data?.delta);
-    if (!validPlayer(player) || !Number.isFinite(delta) || Math.abs(delta) > 10) return;
-    if (!game.responses[player]) {
-      socket.emit('score-result', { ok: false, player, reason: 'not_submitted' });
-      return;
-    }
-    if (!applyAward(player, delta)) {
-      socket.emit('score-result', { ok: false, player, reason: 'already_scored' });
-      return;
-    }
-    socket.emit('score-result', { ok: true, player });
-  });
-
-  socket.on('teacher-score-all-submitted', () => {
-    if (clientType !== 'teacher') return;
-    let count = 0;
-    for (let player = 1; player <= 12; player++) {
-      if (isEligible(player) && game.responses[player] && !hasAward(player) && applyAward(player, 1)) count++;
-    }
-    socket.emit('bulk-score-result', { ok: true, count });
-  });
-
-  socket.on('teacher-clear-award', data => {
-    if (clientType !== 'teacher') return;
-    clearAward(Number(data?.player));
-  });
-
-  socket.on('teacher-view-round', data => {
-    if (clientType !== 'teacher') return;
-    const round = Number(data?.round);
-    const valid = round === game.round || game.history.some(h => h.round === round);
-    if (!valid) return;
-    game.displayViewRound = round;
-    io.to('teacher').emit('display-view-changed', fullState());
-    sendDisplayState();
-  });
-
-  socket.on('teacher-clear-answers', () => {
-    if (clientType !== 'teacher') return;
-    game.responses = {};
-    emitStateEvent('round-changed');
-  });
-
-  socket.on('teacher-next-round', () => {
-    if (clientType !== 'teacher') return;
-    archiveCurrentRound();
-    clearRoundTimer();
-    game.round += 1;
-    game.question = '';
-    game.responses = {};
-    game.roundAwards = {};
-    game.phase = 'waiting';
-    game.locked = true;
-    game.displayViewRound = game.round;
-    emitStateEvent('round-changed');
-  });
-
-  socket.on('teacher-reset-all', () => {
-    if (clientType !== 'teacher') return;
-    clearRoundTimer();
-    game.round = 1;
-    game.question = '';
-    game.responses = {};
-    game.practiceResponses = {};
-    game.roundAwards = {};
-    game.history = [];
-    game.eligiblePlayers = [...ALL_PLAYERS];
-    game.phase = 'waiting';
-    game.locked = true;
-    game.displayViewRound = 1;
-    for (let i = 1; i <= 12; i++) game.scores[i] = 0;
-    emitStateEvent('reset-all');
-  });
-
-  socket.on('disconnect', () => {
-    socketPlayers.delete(socket.id);
-    updateActivePlayers();
-    console.log(`[斷線] ${socket.id}`);
-  });
+const express=require('express');
+const http=require('http');
+const path=require('path');
+const crypto=require('crypto');
+const {Server}=require('socket.io');
+const app=express(),server=http.createServer(app),BASE_PATH='/signwall',PORT=process.env.PORT||3000;
+const io=new Server(server,{cors:{origin:'*'},path:`${BASE_PATH}/socket.io`});
+app.use(BASE_PATH,express.static(path.join(__dirname,'public')));
+const ALL=Array.from({length:12},(_,i)=>i+1),PAPERS=new Set(['white','english','chinese']),GRACE=1500;
+const TEACHER_PASSWORD=String(process.env.TEACHER_PASSWORD||'1234');
+const games=new Map(),socketPlayers=new Map();let signatureCount=0;
+const room=(code,type)=>`competition:${code}:${type}`;
+function makeGame(code){return{code,competitionName:'英文單字競賽',round:1,question:'',scores:Object.fromEntries(ALL.map(i=>[i,0])),responses:{},practiceResponses:{},roundAwards:{},history:[],activePlayers:[],eligiblePlayers:[...ALL],paperStyle:'white',previewDuration:3,previewEndAt:null,timerDuration:30,timerEndAt:null,finalizeGraceUntil:null,phase:'waiting',locked:true,displayViewRound:1,timerHandle:null,createdAt:Date.now()}}
+function newCode(){for(let i=0;i<50;i++){const c=String(crypto.randomInt(1000,10000));if(!games.has(c))return c}return String(Date.now()).slice(-4)}
+function validPlayer(n){return Number.isInteger(n)&&n>=1&&n<=12}
+function gameOf(s){return s.data.sessionCode?games.get(s.data.sessionCode):null}
+function teacherGame(s){return s.data.teacherAuthed?gameOf(s):null}
+function historyRounds(g){return g.history.map(h=>h.round)}
+function full(g){return{sessionCode:g.code,competitionName:g.competitionName,round:g.round,question:g.question,scores:{...g.scores},responses:{...g.responses},practiceResponses:{...g.practiceResponses},roundAwards:{...g.roundAwards},activePlayers:[...g.activePlayers],eligiblePlayers:[...g.eligiblePlayers],paperStyle:g.paperStyle,previewDuration:g.previewDuration,previewEndAt:g.previewEndAt,timerDuration:g.timerDuration,timerEndAt:g.timerEndAt,phase:g.phase,locked:g.locked,historyRounds:historyRounds(g),displayViewRound:g.displayViewRound}}
+function student(g){const s=full(g);delete s.scores;delete s.responses;delete s.practiceResponses;delete s.roundAwards;delete s.historyRounds;delete s.displayViewRound;return s}
+function displayFor(g,r=g.displayViewRound){if(r===g.round){const practice=g.phase==='practice';return{...full(g),responses:practice?{...g.practiceResponses}:{...g.responses},eligiblePlayers:practice?[...ALL]:[...g.eligiblePlayers],practiceMode:practice,viewingHistory:false,currentRound:g.round}}const h=g.history.find(x=>x.round===r);if(!h)return displayFor(g,g.round);return{sessionCode:g.code,competitionName:g.competitionName,round:h.round,question:h.question,scores:{...h.scoresAfterRound},responses:JSON.parse(JSON.stringify(h.responses||{})),roundAwards:{...(h.roundAwards||{})},eligiblePlayers:[...(h.eligiblePlayers||ALL)],paperStyle:h.paperStyle||'white',previewDuration:h.previewDuration??g.previewDuration,previewEndAt:null,timerDuration:h.timerDuration||g.timerDuration,timerEndAt:null,phase:'history',locked:true,practiceMode:false,viewingHistory:true,currentRound:g.round,displayViewRound:h.round}}
+function sendDisplay(g){io.to(room(g.code,'display')).emit('display-state',displayFor(g))}
+function emitState(g,event){io.to(room(g.code,'student')).emit(event,student(g));io.to(room(g.code,'teacher')).emit(event,full(g));sendDisplay(g)}
+function clearTimer(g){if(g.timerHandle)clearTimeout(g.timerHandle);g.timerHandle=null;g.previewEndAt=null;g.timerEndAt=null;g.finalizeGraceUntil=null}
+function endAnswer(g){if(g.phase!=='running')return;g.phase='ended';g.locked=true;g.timerEndAt=Date.now();g.finalizeGraceUntil=Date.now()+GRACE;g.timerHandle=null;emitState(g,'timer-ended')}
+function beginAnswer(g){if(g.phase!=='preview')return;g.phase='running';g.locked=false;g.previewEndAt=null;g.finalizeGraceUntil=null;g.timerEndAt=Date.now()+g.timerDuration*1000;g.timerHandle=setTimeout(()=>endAnswer(g),g.timerDuration*1000);emitState(g,'answer-started')}
+function startQuestion(g,p,a){clearTimer(g);g.practiceResponses={};g.previewDuration=p;g.timerDuration=a;g.locked=true;g.displayViewRound=g.round;g.phase='preview';if(p<=0)return beginAnswer(g);g.previewEndAt=Date.now()+p*1000;g.timerHandle=setTimeout(()=>beginAnswer(g),p*1000);emitState(g,'preview-started')}
+function restartAnswer(g,s){clearTimer(g);g.timerDuration=s;g.phase='running';g.locked=false;g.timerEndAt=Date.now()+s*1000;g.timerHandle=setTimeout(()=>endAnswer(g),s*1000);g.displayViewRound=g.round;emitState(g,'answer-started')}
+function archive(g){if(g.phase==='waiting'&&!g.question&&!Object.keys(g.responses).length)return;const snap={round:g.round,question:g.question,responses:JSON.parse(JSON.stringify(g.responses)),roundAwards:{...g.roundAwards},scoresAfterRound:{...g.scores},eligiblePlayers:[...g.eligiblePlayers],paperStyle:g.paperStyle,previewDuration:g.previewDuration,timerDuration:g.timerDuration,endedAt:Date.now()};const i=g.history.findIndex(h=>h.round===g.round);if(i>=0)g.history[i]=snap;else g.history.push(snap);if(g.history.length>100)g.history.shift()}
+function validStrokes(strokes,w,h,empty=false){if(!Array.isArray(strokes)||(!empty&&!strokes.length)||strokes.length>120)return false;let total=0;for(const st of strokes){if(!Array.isArray(st)||!st.length||st.length>2500)return false;total+=st.length;if(total>20000)return false;for(const p of st)if(!p||!Number.isFinite(p.x)||!Number.isFinite(p.y)||p.x<0||p.y<0||p.x>w||p.y>h)return false}return true}
+function updateActive(g){const set=new Set();for(const [id,v] of socketPlayers){if(v.code===g.code&&validPlayer(v.player))set.add(v.player)}g.activePlayers=[...set].sort((a,b)=>a-b);io.to(room(g.code,'student')).emit('active-players',g.activePlayers);io.to(room(g.code,'teacher')).emit('active-players',g.activePlayers)}
+function publish(g,p,response){if(response)g.responses[p]=response;else delete g.responses[p];io.to(room(g.code,'teacher')).emit('answer-updated',{player:p,response});if(g.displayViewRound===g.round)io.to(room(g.code,'display')).emit('answer-updated',{player:p,response})}
+function hasAward(g,p){return Object.prototype.hasOwnProperty.call(g.roundAwards,p)}
+function award(g,p,d){if(!validPlayer(p)||!g.eligiblePlayers.includes(p)||hasAward(g,p))return false;const old=g.scores[p]||0;g.scores[p]=Math.max(0,old+d);g.roundAwards[p]=d;const payload={player:p,score:g.scores[p],delta:g.scores[p]-old,awardDelta:d,animate:true};io.to(room(g.code,'teacher')).emit('score-updated',payload);if(g.displayViewRound===g.round)io.to(room(g.code,'display')).emit('score-updated',payload);return true}
+function clearAward(g,p){if(!validPlayer(p)||!hasAward(g,p))return;const d=Number(g.roundAwards[p])||0,old=g.scores[p]||0;g.scores[p]=Math.max(0,old-d);delete g.roundAwards[p];io.to(room(g.code,'teacher')).emit('award-cleared',{player:p,score:g.scores[p]});if(g.displayViewRound===g.round&&g.scores[p]!==old)io.to(room(g.code,'display')).emit('score-updated',{player:p,score:g.scores[p],delta:g.scores[p]-old,animate:false})}
+function joinSession(socket,code,type){code=String(code||'').trim();const g=games.get(code);if(!g){socket.emit('session-result',{ok:false,reason:'not_found'});return null}if(socket.data.sessionCode)socket.leave(room(socket.data.sessionCode,type));socket.data.sessionCode=code;socket.join(room(code,type));socket.emit('session-result',{ok:true,sessionCode:code,competitionName:g.competitionName});if(type==='display')socket.emit('display-state',displayFor(g));else socket.emit('game-state',type==='student'?student(g):full(g));return g}
+io.on('connection',socket=>{const type=String(socket.handshake.query.type||'unknown');socket.data.clientType=type;
+ socket.on('teacher-auth',data=>{if(type!=='teacher')return;if(String(data?.password||'')!==TEACHER_PASSWORD)return socket.emit('teacher-auth-result',{ok:false,reason:'bad_password'});let code=String(data?.sessionCode||'').trim(),g=code?games.get(code):null;if(code&&!g)return socket.emit('teacher-auth-result',{ok:false,reason:'not_found'});if(!g){code=newCode();g=makeGame(code);games.set(code,g)}socket.data.teacherAuthed=true;socket.data.sessionCode=code;socket.join(room(code,'teacher'));socket.emit('teacher-auth-result',{ok:true,sessionCode:code,state:full(g)})});
+ socket.on('join-session',data=>{if(!['student','display'].includes(type))return;joinSession(socket,data?.sessionCode,type)});
+ socket.on('state-request',()=>{const g=gameOf(socket);if(!g)return;if(type==='teacher'&&!socket.data.teacherAuthed)return;if(type==='display')socket.emit('display-state',displayFor(g));else socket.emit('game-state',type==='student'?student(g):full(g))});
+ socket.on('new-signature',data=>{if(!data||!Array.isArray(data.strokes)||!data.strokes.length)return;signatureCount++;socket.broadcast.emit('new-signature',data)});
+ socket.on('player-select',data=>{const g=gameOf(socket);if(type!=='student'||!g)return;const p=Number(data?.player);if(!validPlayer(p))return;const occupied=[...socketPlayers.entries()].some(([id,v])=>id!==socket.id&&v.code===g.code&&v.player===p);if(occupied)return socket.emit('player-select-result',{ok:false,player:p,reason:'occupied'});socketPlayers.set(socket.id,{code:g.code,player:p});updateActive(g);socket.emit('player-select-result',{ok:true,player:p})});
+ socket.on('submit-answer',data=>{const g=gameOf(socket),sp=socketPlayers.get(socket.id);if(type!=='student'||!g||!sp)return;const p=Number(data?.player),w=Number(data?.width),h=Number(data?.height),auto=data?.autoFinal===true,r=Number(data?.round);if(sp.code!==g.code||sp.player!==p||!validPlayer(p)||!Number.isFinite(w)||!Number.isFinite(h)||w<=0||h<=0||w>5000||h>5000||!validStrokes(data?.strokes,w,h,auto))return;if(g.phase==='practice'){if(!data.strokes.length)return;const response={player:p,round:g.round,strokes:data.strokes,width:w,height:h,submittedAt:Date.now()};g.practiceResponses[p]=response;io.to(room(g.code,'teacher')).emit('practice-answer-updated',{player:p,response});io.to(room(g.code,'display')).emit('answer-updated',{player:p,response});return socket.emit('submit-result',{ok:true,practice:true})}if(!g.eligiblePlayers.includes(p))return socket.emit('submit-result',{ok:false,reason:'eliminated'});if(r!==g.round)return;const now=Date.now();if(g.phase==='running'&&g.timerEndAt&&now>=g.timerEndAt)endAnswer(g);const normal=g.phase==='running'&&g.timerEndAt&&now<g.timerEndAt,final=g.phase==='ended'&&auto&&g.finalizeGraceUntil&&now<=g.finalizeGraceUntil;if(!normal&&!final)return socket.emit('submit-result',{ok:false,reason:g.phase==='ended'?'locked':'not_started'});if(auto&&!data.strokes.length){publish(g,p,null);return socket.emit('submit-result',{ok:true,autoFinal:true,blank:true})}publish(g,p,{player:p,round:g.round,strokes:data.strokes,width:w,height:h,submittedAt:now,autoFinal:auto});socket.emit('submit-result',{ok:true,autoFinal:auto})});
+ const T=(event,fn)=>socket.on(event,data=>{const g=teacherGame(socket);if(g)fn(g,data)});
+ T('teacher-start-practice',g=>{clearTimer(g);g.phase='practice';g.locked=false;g.question='';g.practiceResponses={};g.displayViewRound=g.round;emitState(g,'practice-started')});T('teacher-end-practice',g=>{clearTimer(g);g.phase='waiting';g.locked=true;g.practiceResponses={};emitState(g,'practice-ended')});
+ T('teacher-set-competition-name',(g,d)=>{if(!['waiting','practice'].includes(g.phase))return socket.emit('competition-name-result',{ok:false,reason:'round_active'});const n=String(d?.name||'').trim().slice(0,80);if(!n)return socket.emit('competition-name-result',{ok:false,reason:'empty'});g.competitionName=n;emitState(g,'competition-name-changed');socket.emit('competition-name-result',{ok:true,name:n})});
+ T('teacher-set-eligible-players',(g,d)=>{if(!['waiting','practice'].includes(g.phase))return socket.emit('participants-result',{ok:false,reason:'round_active'});const ps=[...new Set((Array.isArray(d?.players)?d.players:[]).map(Number).filter(validPlayer))].sort((a,b)=>a-b);if(!ps.length)return socket.emit('participants-result',{ok:false,reason:'empty'});g.eligiblePlayers=ps;emitState(g,'participants-changed');socket.emit('participants-result',{ok:true,count:ps.length})});
+ T('teacher-set-paper-style',(g,d)=>{const s=String(d?.style||'white');if(PAPERS.has(s)){g.paperStyle=s;emitState(g,'paper-style-changed')}});
+ T('teacher-set-question',(g,d)=>{if(g.phase!=='waiting')return socket.emit('question-result',{ok:false,reason:'not_waiting'});const p=Math.round(Number(d?.previewSeconds??g.previewDuration)),a=Math.round(Number(d?.answerSeconds??g.timerDuration));if(!Number.isFinite(p)||p<0||p>30||!Number.isFinite(a)||a<5||a>300)return;g.question=String(d?.question||'').slice(0,200);startQuestion(g,p,a);socket.emit('question-result',{ok:true})});
+ T('teacher-start-timer',(g,d)=>{const s=Math.round(Number(d?.seconds));if(Number.isFinite(s)&&s>=5&&s<=300)restartAnswer(g,s)});
+ T('teacher-score',(g,d)=>{const p=Number(d?.player),delta=Number(d?.delta);if(!validPlayer(p)||!Number.isFinite(delta)||Math.abs(delta)>10)return;if(!g.responses[p])return socket.emit('score-result',{ok:false,player:p,reason:'not_submitted'});if(!award(g,p,delta))return socket.emit('score-result',{ok:false,player:p,reason:'already_scored'});socket.emit('score-result',{ok:true,player:p})});
+ T('teacher-score-all-submitted',g=>{let count=0;for(const p of ALL)if(g.eligiblePlayers.includes(p)&&g.responses[p]&&!hasAward(g,p)&&award(g,p,1))count++;socket.emit('bulk-score-result',{ok:true,count})});T('teacher-clear-award',(g,d)=>clearAward(g,Number(d?.player)));
+ T('teacher-view-round',(g,d)=>{const r=Number(d?.round);if(r!==g.round&&!g.history.some(h=>h.round===r))return;g.displayViewRound=r;io.to(room(g.code,'teacher')).emit('display-view-changed',full(g));sendDisplay(g)});
+ T('teacher-next-round',g=>{archive(g);clearTimer(g);g.round++;g.question='';g.responses={};g.roundAwards={};g.phase='waiting';g.locked=true;g.displayViewRound=g.round;emitState(g,'round-changed')});
+ T('teacher-reset-all',g=>{clearTimer(g);g.round=1;g.question='';g.responses={};g.practiceResponses={};g.roundAwards={};g.history=[];g.eligiblePlayers=[...ALL];g.phase='waiting';g.locked=true;g.displayViewRound=1;for(const p of ALL)g.scores[p]=0;emitState(g,'reset-all')});
+ socket.on('disconnect',()=>{const sp=socketPlayers.get(socket.id);socketPlayers.delete(socket.id);if(sp){const g=games.get(sp.code);if(g)updateActive(g)}})
 });
-
-app.get('/health', (_req, res) => res.json({ ok: true }));
-app.get(`${BASE_PATH}/api/game`, (_req, res) => res.json(fullState()));
-app.get(`${BASE_PATH}/api/history`, (_req, res) => res.json(game.history));
-
-server.listen(PORT, () => {
-  console.log(`伺服器啟動：http://0.0.0.0:${PORT}${BASE_PATH}`);
-  console.log(`  學生端 → http://localhost:${PORT}${BASE_PATH}/student.html`);
-  console.log(`  老師端 → http://localhost:${PORT}${BASE_PATH}/teacher.html`);
-  console.log(`  大螢幕 → http://localhost:${PORT}${BASE_PATH}/competition.html`);
-});
+app.get('/health',(_q,r)=>r.json({ok:true,sessions:games.size}));
+app.get(`${BASE_PATH}/api/game/:code`,(q,r)=>{const g=games.get(q.params.code);g?r.json(full(g)):r.status(404).json({error:'not_found'})});
+server.listen(PORT,()=>console.log(`SignWall + Competition: http://0.0.0.0:${PORT}${BASE_PATH} (teacher password configured: ${process.env.TEACHER_PASSWORD?'env':'default 1234'})`));
