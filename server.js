@@ -21,9 +21,11 @@ const game = {
   roundAwards: {},
   history: [],
   activePlayers: [],
+  previewDuration: 3,
+  previewEndAt: null,
   timerDuration: 30,
   timerEndAt: null,
-  phase: 'waiting', // waiting | running | ended
+  phase: 'waiting', // waiting | preview | running | ended
   locked: true,
   displayViewRound: 1
 };
@@ -41,6 +43,8 @@ function fullState() {
     responses: { ...game.responses },
     roundAwards: { ...game.roundAwards },
     activePlayers: [...game.activePlayers],
+    previewDuration: game.previewDuration,
+    previewEndAt: game.previewEndAt,
     timerDuration: game.timerDuration,
     timerEndAt: game.timerEndAt,
     phase: game.phase,
@@ -55,6 +59,8 @@ function studentState() {
     round: game.round,
     question: game.question,
     activePlayers: [...game.activePlayers],
+    previewDuration: game.previewDuration,
+    previewEndAt: game.previewEndAt,
     timerDuration: game.timerDuration,
     timerEndAt: game.timerEndAt,
     phase: game.phase,
@@ -63,11 +69,7 @@ function studentState() {
 }
 
 function liveDisplayState() {
-  return {
-    ...fullState(),
-    viewingHistory: false,
-    currentRound: game.round
-  };
+  return { ...fullState(), viewingHistory: false, currentRound: game.round };
 }
 
 function displayStateForRound(round) {
@@ -80,6 +82,8 @@ function displayStateForRound(round) {
     scores: { ...h.scoresAfterRound },
     responses: JSON.parse(JSON.stringify(h.responses || {})),
     roundAwards: { ...(h.roundAwards || {}) },
+    previewDuration: h.previewDuration ?? game.previewDuration,
+    previewEndAt: null,
     timerDuration: h.timerDuration || game.timerDuration,
     timerEndAt: null,
     phase: 'history',
@@ -134,13 +138,14 @@ function updateActivePlayers() {
   io.to('student').emit('active-players', game.activePlayers);
 }
 
-function clearTimer() {
+function clearRoundTimer() {
   if (timerHandle) clearTimeout(timerHandle);
   timerHandle = null;
+  game.previewEndAt = null;
   game.timerEndAt = null;
 }
 
-function endTimer() {
+function endAnswering() {
   if (game.phase !== 'running') return;
   game.phase = 'ended';
   game.locked = true;
@@ -149,14 +154,45 @@ function endTimer() {
   emitStateEvent('timer-ended');
 }
 
-function startTimer(seconds) {
-  clearTimer();
+function beginAnswering() {
+  if (game.phase !== 'preview') return;
+  game.phase = 'running';
+  game.locked = false;
+  game.previewEndAt = null;
+  game.timerEndAt = Date.now() + game.timerDuration * 1000;
+  timerHandle = setTimeout(endAnswering, game.timerDuration * 1000);
+  emitStateEvent('answer-started');
+}
+
+function startQuestion(previewSeconds, answerSeconds) {
+  clearRoundTimer();
+  game.previewDuration = previewSeconds;
+  game.timerDuration = answerSeconds;
+  game.locked = true;
+  game.displayViewRound = game.round;
+
+  if (previewSeconds <= 0) {
+    game.phase = 'preview';
+    beginAnswering();
+    return;
+  }
+
+  game.phase = 'preview';
+  game.previewEndAt = Date.now() + previewSeconds * 1000;
+  game.timerEndAt = null;
+  timerHandle = setTimeout(beginAnswering, previewSeconds * 1000);
+  emitStateEvent('preview-started');
+}
+
+function restartAnswering(seconds) {
+  clearRoundTimer();
   game.timerDuration = seconds;
   game.phase = 'running';
   game.locked = false;
   game.timerEndAt = Date.now() + seconds * 1000;
-  timerHandle = setTimeout(endTimer, seconds * 1000);
-  emitStateEvent('timer-started');
+  timerHandle = setTimeout(endAnswering, seconds * 1000);
+  game.displayViewRound = game.round;
+  emitStateEvent('answer-started');
 }
 
 function archiveCurrentRound() {
@@ -168,6 +204,7 @@ function archiveCurrentRound() {
     responses: JSON.parse(JSON.stringify(game.responses)),
     roundAwards: { ...game.roundAwards },
     scoresAfterRound: { ...game.scores },
+    previewDuration: game.previewDuration,
     timerDuration: game.timerDuration,
     endedAt: Date.now()
   };
@@ -177,13 +214,7 @@ function archiveCurrentRound() {
 }
 
 function emitScore(player, appliedDelta, awardDelta, animate = true) {
-  const payload = {
-    player,
-    score: game.scores[player],
-    delta: appliedDelta,
-    awardDelta,
-    animate
-  };
+  const payload = { player, score: game.scores[player], delta: appliedDelta, awardDelta, animate };
   io.to('teacher').emit('score-updated', payload);
   if (game.displayViewRound === game.round) io.to('display').emit('score-updated', payload);
 }
@@ -252,7 +283,7 @@ io.on('connection', socket => {
       return;
     }
     if (Date.now() >= game.timerEndAt) {
-      endTimer();
+      endAnswering();
       socket.emit('submit-result', { ok: false, reason: 'locked' });
       return;
     }
@@ -263,37 +294,30 @@ io.on('connection', socket => {
     if (Number(data?.round) !== game.round) return;
     if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0 || width > 5000 || height > 5000) return;
     if (!validStrokes(data?.strokes, width, height)) return;
-    const response = {
-      player,
-      round: game.round,
-      strokes: data.strokes,
-      width,
-      height,
-      submittedAt: Date.now()
-    };
+    const response = { player, round: game.round, strokes: data.strokes, width, height, submittedAt: Date.now() };
     game.responses[player] = response;
     io.to('teacher').emit('answer-updated', { player, response });
     if (game.displayViewRound === game.round) io.to('display').emit('answer-updated', { player, response });
     socket.emit('submit-result', { ok: true });
   });
 
-  // 公布題目即開始倒數；若是口頭題目，question 可以留白。
+  // 公布題目 -> 看題倒數 -> 自動開始正式作答倒數。
   socket.on('teacher-set-question', data => {
     if (clientType !== 'teacher') return;
-    const seconds = Math.round(Number(data?.seconds ?? game.timerDuration));
-    if (!Number.isFinite(seconds) || seconds < 5 || seconds > 300) return;
+    const previewSeconds = Math.round(Number(data?.previewSeconds ?? game.previewDuration));
+    const answerSeconds = Math.round(Number(data?.answerSeconds ?? game.timerDuration));
+    if (!Number.isFinite(previewSeconds) || previewSeconds < 0 || previewSeconds > 30) return;
+    if (!Number.isFinite(answerSeconds) || answerSeconds < 5 || answerSeconds > 300) return;
     game.question = String(data?.question || '').slice(0, 200);
-    game.displayViewRound = game.round;
-    startTimer(seconds);
+    startQuestion(previewSeconds, answerSeconds);
   });
 
-  // 保留「重新計時」給現場需要延長時間時使用。
+  // 現場需要延長或重開時，可直接重新開始作答倒數，不重播看題階段。
   socket.on('teacher-start-timer', data => {
     if (clientType !== 'teacher') return;
     const seconds = Math.round(Number(data?.seconds));
     if (!Number.isFinite(seconds) || seconds < 5 || seconds > 300) return;
-    game.displayViewRound = game.round;
-    startTimer(seconds);
+    restartAnswering(seconds);
   });
 
   socket.on('teacher-score', data => {
@@ -323,8 +347,7 @@ io.on('connection', socket => {
 
   socket.on('teacher-clear-award', data => {
     if (clientType !== 'teacher') return;
-    const player = Number(data?.player);
-    clearAward(player);
+    clearAward(Number(data?.player));
   });
 
   socket.on('teacher-view-round', data => {
@@ -346,7 +369,7 @@ io.on('connection', socket => {
   socket.on('teacher-next-round', () => {
     if (clientType !== 'teacher') return;
     archiveCurrentRound();
-    clearTimer();
+    clearRoundTimer();
     game.round += 1;
     game.question = '';
     game.responses = {};
@@ -359,7 +382,7 @@ io.on('connection', socket => {
 
   socket.on('teacher-reset-all', () => {
     if (clientType !== 'teacher') return;
-    clearTimer();
+    clearRoundTimer();
     game.round = 1;
     game.question = '';
     game.responses = {};
