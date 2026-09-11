@@ -18,13 +18,20 @@ const game = {
   question: '',
   scores: Object.fromEntries(Array.from({ length: 12 }, (_, i) => [i + 1, 0])),
   responses: {},
+  roundAwards: {},
   history: [],
   activePlayers: [],
   timerDuration: 30,
   timerEndAt: null,
-  locked: false
+  phase: 'waiting', // waiting | running | ended
+  locked: true,
+  displayViewRound: 1
 };
 const socketPlayers = new Map();
+
+function historyRounds() {
+  return game.history.map(h => h.round);
+}
 
 function fullState() {
   return {
@@ -32,10 +39,14 @@ function fullState() {
     question: game.question,
     scores: { ...game.scores },
     responses: { ...game.responses },
+    roundAwards: { ...game.roundAwards },
     activePlayers: [...game.activePlayers],
     timerDuration: game.timerDuration,
     timerEndAt: game.timerEndAt,
-    locked: game.locked
+    phase: game.phase,
+    locked: game.locked,
+    historyRounds: historyRounds(),
+    displayViewRound: game.displayViewRound
   };
 }
 
@@ -46,18 +57,59 @@ function studentState() {
     activePlayers: [...game.activePlayers],
     timerDuration: game.timerDuration,
     timerEndAt: game.timerEndAt,
+    phase: game.phase,
     locked: game.locked
   };
+}
+
+function liveDisplayState() {
+  return {
+    ...fullState(),
+    viewingHistory: false,
+    currentRound: game.round
+  };
+}
+
+function displayStateForRound(round) {
+  if (round === game.round) return liveDisplayState();
+  const h = game.history.find(x => x.round === round);
+  if (!h) return liveDisplayState();
+  return {
+    round: h.round,
+    question: h.question,
+    scores: { ...h.scoresAfterRound },
+    responses: JSON.parse(JSON.stringify(h.responses || {})),
+    roundAwards: { ...(h.roundAwards || {}) },
+    timerDuration: h.timerDuration || game.timerDuration,
+    timerEndAt: null,
+    phase: 'history',
+    locked: true,
+    viewingHistory: true,
+    currentRound: game.round,
+    displayViewRound: h.round
+  };
+}
+
+function currentDisplayState() {
+  return displayStateForRound(game.displayViewRound);
+}
+
+function sendDisplayState() {
+  io.to('display').emit('display-state', currentDisplayState());
 }
 
 function emitStateEvent(eventName) {
   io.to('student').emit(eventName, studentState());
   io.to('teacher').emit(eventName, fullState());
-  io.to('display').emit(eventName, fullState());
+  sendDisplayState();
 }
 
 function validPlayer(n) {
   return Number.isInteger(n) && n >= 1 && n <= 12;
+}
+
+function hasAward(player) {
+  return Object.prototype.hasOwnProperty.call(game.roundAwards, player);
 }
 
 function validStrokes(strokes, width, height) {
@@ -79,7 +131,7 @@ function updateActivePlayers() {
   const active = new Set();
   for (const p of socketPlayers.values()) if (validPlayer(p)) active.add(p);
   game.activePlayers = [...active].sort((a, b) => a - b);
-  io.emit('active-players', game.activePlayers);
+  io.to('student').emit('active-players', game.activePlayers);
 }
 
 function clearTimer() {
@@ -89,7 +141,8 @@ function clearTimer() {
 }
 
 function endTimer() {
-  if (game.locked) return;
+  if (game.phase !== 'running') return;
+  game.phase = 'ended';
   game.locked = true;
   game.timerEndAt = Date.now();
   timerHandle = null;
@@ -99,6 +152,7 @@ function endTimer() {
 function startTimer(seconds) {
   clearTimer();
   game.timerDuration = seconds;
+  game.phase = 'running';
   game.locked = false;
   game.timerEndAt = Date.now() + seconds * 1000;
   timerHandle = setTimeout(endTimer, seconds * 1000);
@@ -107,15 +161,55 @@ function startTimer(seconds) {
 
 function archiveCurrentRound() {
   if (!game.question && Object.keys(game.responses).length === 0) return;
-  game.history.push({
+  const existingIndex = game.history.findIndex(h => h.round === game.round);
+  const snapshot = {
     round: game.round,
     question: game.question,
     responses: JSON.parse(JSON.stringify(game.responses)),
+    roundAwards: { ...game.roundAwards },
     scoresAfterRound: { ...game.scores },
     timerDuration: game.timerDuration,
     endedAt: Date.now()
-  });
+  };
+  if (existingIndex >= 0) game.history[existingIndex] = snapshot;
+  else game.history.push(snapshot);
   if (game.history.length > 100) game.history.shift();
+}
+
+function emitScore(player, appliedDelta, awardDelta, animate = true) {
+  const payload = {
+    player,
+    score: game.scores[player],
+    delta: appliedDelta,
+    awardDelta,
+    animate
+  };
+  io.to('teacher').emit('score-updated', payload);
+  if (game.displayViewRound === game.round) io.to('display').emit('score-updated', payload);
+}
+
+function applyAward(player, delta) {
+  if (!validPlayer(player) || hasAward(player)) return false;
+  const oldScore = game.scores[player] || 0;
+  game.scores[player] = Math.max(0, oldScore + delta);
+  const appliedDelta = game.scores[player] - oldScore;
+  game.roundAwards[player] = delta;
+  emitScore(player, appliedDelta, delta, true);
+  return true;
+}
+
+function clearAward(player) {
+  if (!validPlayer(player) || !hasAward(player)) return false;
+  const awardDelta = Number(game.roundAwards[player]) || 0;
+  const oldScore = game.scores[player] || 0;
+  game.scores[player] = Math.max(0, oldScore - awardDelta);
+  const appliedDelta = game.scores[player] - oldScore;
+  delete game.roundAwards[player];
+  io.to('teacher').emit('award-cleared', { player, score: game.scores[player] });
+  if (game.displayViewRound === game.round && appliedDelta !== 0) {
+    io.to('display').emit('score-updated', { player, score: game.scores[player], delta: appliedDelta, awardDelta: null, animate: false });
+  }
+  return true;
 }
 
 io.on('connection', socket => {
@@ -123,7 +217,8 @@ io.on('connection', socket => {
   if (['student', 'teacher', 'display'].includes(clientType)) socket.join(clientType);
   console.log(`[連線] ${socket.id} (${clientType})`);
 
-  socket.emit('game-state', clientType === 'student' ? studentState() : fullState());
+  if (clientType === 'display') socket.emit('display-state', currentDisplayState());
+  else socket.emit('game-state', clientType === 'student' ? studentState() : fullState());
 
   socket.on('new-signature', data => {
     if (!data || !Array.isArray(data.strokes) || !data.strokes.length) return;
@@ -132,7 +227,8 @@ io.on('connection', socket => {
   });
 
   socket.on('state-request', () => {
-    socket.emit('game-state', clientType === 'student' ? studentState() : fullState());
+    if (clientType === 'display') socket.emit('display-state', currentDisplayState());
+    else socket.emit('game-state', clientType === 'student' ? studentState() : fullState());
   });
 
   socket.on('player-select', data => {
@@ -151,8 +247,12 @@ io.on('connection', socket => {
 
   socket.on('submit-answer', data => {
     if (clientType !== 'student') return;
-    if (game.timerEndAt && Date.now() >= game.timerEndAt) endTimer();
-    if (game.locked) {
+    if (game.phase !== 'running' || !game.timerEndAt) {
+      socket.emit('submit-result', { ok: false, reason: game.phase === 'ended' ? 'locked' : 'not_started' });
+      return;
+    }
+    if (Date.now() >= game.timerEndAt) {
+      endTimer();
       socket.emit('submit-result', { ok: false, reason: 'locked' });
       return;
     }
@@ -172,20 +272,27 @@ io.on('connection', socket => {
       submittedAt: Date.now()
     };
     game.responses[player] = response;
-    io.to('teacher').to('display').emit('answer-updated', { player, response });
+    io.to('teacher').emit('answer-updated', { player, response });
+    if (game.displayViewRound === game.round) io.to('display').emit('answer-updated', { player, response });
     socket.emit('submit-result', { ok: true });
   });
 
+  // 公布題目即開始倒數；若是口頭題目，question 可以留白。
   socket.on('teacher-set-question', data => {
     if (clientType !== 'teacher') return;
+    const seconds = Math.round(Number(data?.seconds ?? game.timerDuration));
+    if (!Number.isFinite(seconds) || seconds < 5 || seconds > 300) return;
     game.question = String(data?.question || '').slice(0, 200);
-    emitStateEvent('question-changed');
+    game.displayViewRound = game.round;
+    startTimer(seconds);
   });
 
+  // 保留「重新計時」給現場需要延長時間時使用。
   socket.on('teacher-start-timer', data => {
     if (clientType !== 'teacher') return;
     const seconds = Math.round(Number(data?.seconds));
     if (!Number.isFinite(seconds) || seconds < 5 || seconds > 300) return;
+    game.displayViewRound = game.round;
     startTimer(seconds);
   });
 
@@ -194,10 +301,40 @@ io.on('connection', socket => {
     const player = Number(data?.player);
     const delta = Number(data?.delta);
     if (!validPlayer(player) || !Number.isFinite(delta) || Math.abs(delta) > 10) return;
-    const oldScore = game.scores[player] || 0;
-    game.scores[player] = Math.max(0, oldScore + delta);
-    const appliedDelta = game.scores[player] - oldScore;
-    io.to('teacher').to('display').emit('score-updated', { player, score: game.scores[player], delta: appliedDelta });
+    if (!game.responses[player]) {
+      socket.emit('score-result', { ok: false, player, reason: 'not_submitted' });
+      return;
+    }
+    if (!applyAward(player, delta)) {
+      socket.emit('score-result', { ok: false, player, reason: 'already_scored' });
+      return;
+    }
+    socket.emit('score-result', { ok: true, player });
+  });
+
+  socket.on('teacher-score-all-submitted', () => {
+    if (clientType !== 'teacher') return;
+    let count = 0;
+    for (let player = 1; player <= 12; player++) {
+      if (game.responses[player] && !hasAward(player) && applyAward(player, 1)) count++;
+    }
+    socket.emit('bulk-score-result', { ok: true, count });
+  });
+
+  socket.on('teacher-clear-award', data => {
+    if (clientType !== 'teacher') return;
+    const player = Number(data?.player);
+    clearAward(player);
+  });
+
+  socket.on('teacher-view-round', data => {
+    if (clientType !== 'teacher') return;
+    const round = Number(data?.round);
+    const valid = round === game.round || game.history.some(h => h.round === round);
+    if (!valid) return;
+    game.displayViewRound = round;
+    io.to('teacher').emit('display-view-changed', fullState());
+    sendDisplayState();
   });
 
   socket.on('teacher-clear-answers', () => {
@@ -213,7 +350,10 @@ io.on('connection', socket => {
     game.round += 1;
     game.question = '';
     game.responses = {};
-    game.locked = false;
+    game.roundAwards = {};
+    game.phase = 'waiting';
+    game.locked = true;
+    game.displayViewRound = game.round;
     emitStateEvent('round-changed');
   });
 
@@ -223,8 +363,11 @@ io.on('connection', socket => {
     game.round = 1;
     game.question = '';
     game.responses = {};
+    game.roundAwards = {};
     game.history = [];
-    game.locked = false;
+    game.phase = 'waiting';
+    game.locked = true;
+    game.displayViewRound = 1;
     for (let i = 1; i <= 12; i++) game.scores[i] = 0;
     emitStateEvent('reset-all');
   });
