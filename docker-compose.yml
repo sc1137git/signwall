@@ -1,9 +1,9 @@
-name: english-competition
+name: spelling
 
 services:
-  english-competition:
+  spelling:
     build: .
-    container_name: english-competition
+    container_name: spelling
     restart: unless-stopped
     ports:
       - "3001:3000"
