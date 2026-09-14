@@ -1,5 +1,5 @@
 {
-  "name": "english-handwriting-competition",
+  "name": "spelling-handwriting-competition",
   "version": "1.1.0",
   "description": "校內英語手寫競賽 - iPad 即時作答、投影與老師評分系統",
   "main": "server.js",
