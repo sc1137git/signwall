@@ -1,0 +1,32 @@
+Spelling 英語手寫競賽｜Synology NAS 安裝
+
+建議資料夾：
+/volume1/docker/spelling
+
+Container Manager：
+1. 專案 → 新增
+2. 專案名稱：spelling
+3. 路徑選擇：/volume1/docker/spelling
+4. 使用本資料夾 docker-compose.yml 建立
+
+對外 Port：3001
+Container 名稱：spelling
+
+預設入口：
+http://NAS_IP:3001/signwall/
+
+投影：
+http://NAS_IP:3001/signwall/competition.html
+
+老師：
+http://NAS_IP:3001/signwall/teacher.html
+
+學生：
+http://NAS_IP:3001/signwall/student.html
+
+老師密碼：
+若未建立 .env，測試預設密碼為 1234。
+正式使用請將 .env.example 複製成 .env，並修改：
+TEACHER_PASSWORD=你的密碼
+
+這個專案與原本 signwall 分離，請勿使用 3000 Port。
