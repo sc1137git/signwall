@@ -1,7 +1,14 @@
+name: english-competition
+
 services:
-  signwall:
+  english-competition:
     build: .
-    container_name: signwall
+    container_name: english-competition
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3001:3000"
+    environment:
+      - TEACHER_PASSWORD=${TEACHER_PASSWORD:-1234}
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
+    volumes:
+      - ./data:/app/data

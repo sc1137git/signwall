@@ -1,65 +1,60 @@
-const express = require('express');
-const http = require('http');
-const path = require('path');
-const { Server } = require('socket.io');
-
-const app = express();
-const server = http.createServer(app);
-
-// 因為網域路徑會多一層 /signwall/，Socket.io 的連線路徑也要跟著加這個前綴，
-// 不然反向代理轉發過來的 WebSocket 請求會對不上（造成頁面打得開、但簽名傳不過去）。
-const BASE_PATH = '/signwall';
-
-const io = new Server(server, {
-  cors: { origin: '*' },
-  path: `${BASE_PATH}/socket.io`
+const express=require('express');
+const http=require('http');
+const path=require('path');
+const crypto=require('crypto');
+const {Server}=require('socket.io');
+const app=express(),server=http.createServer(app),BASE_PATH='/signwall',PORT=process.env.PORT||3000;
+const io=new Server(server,{cors:{origin:'*'},path:`${BASE_PATH}/socket.io`});
+app.use(BASE_PATH,express.static(path.join(__dirname,'public')));
+const ALL=Array.from({length:12},(_,i)=>i+1),PAPERS=new Set(['white','english','chinese']),GRACE=1500;
+const TEACHER_PASSWORD=String(process.env.TEACHER_PASSWORD||'1234');
+const games=new Map(),socketPlayers=new Map();let signatureCount=0;
+const room=(code,type)=>`competition:${code}:${type}`;
+function makeGame(code){return{code,competitionName:'英文單字競賽',round:1,question:'',scores:Object.fromEntries(ALL.map(i=>[i,0])),players:{},responses:{},practiceResponses:{},roundAwards:{},history:[],activePlayers:[],eligiblePlayers:[...ALL],paperStyle:'white',previewDuration:3,previewEndAt:null,timerDuration:30,timerEndAt:null,finalizeGraceUntil:null,phase:'waiting',locked:true,displayViewRound:1,timerHandle:null,createdAt:Date.now()}}
+function newCode(){for(let i=0;i<50;i++){const c=String(crypto.randomInt(1000,10000));if(!games.has(c))return c}return String(Date.now()).slice(-4)}
+function validPlayer(n){return Number.isInteger(n)&&n>=1&&n<=12}
+function cleanProfile(d){return{className:String(d?.className||'').trim().slice(0,20),seatNo:String(d?.seatNo||'').trim().slice(0,10),name:String(d?.name||'').trim().slice(0,30)}}
+function gameOf(s){return s.data.sessionCode?games.get(s.data.sessionCode):null}
+function teacherGame(s){return s.data.teacherAuthed?gameOf(s):null}
+function historyRounds(g){return g.history.map(h=>h.round)}
+function full(g){return{sessionCode:g.code,competitionName:g.competitionName,round:g.round,question:g.question,scores:{...g.scores},players:JSON.parse(JSON.stringify(g.players)),responses:{...g.responses},practiceResponses:{...g.practiceResponses},roundAwards:{...g.roundAwards},activePlayers:[...g.activePlayers],eligiblePlayers:[...g.eligiblePlayers],paperStyle:g.paperStyle,previewDuration:g.previewDuration,previewEndAt:g.previewEndAt,timerDuration:g.timerDuration,timerEndAt:g.timerEndAt,phase:g.phase,locked:g.locked,historyRounds:historyRounds(g),displayViewRound:g.displayViewRound}}
+function student(g){const s=full(g);delete s.scores;delete s.responses;delete s.practiceResponses;delete s.roundAwards;delete s.historyRounds;delete s.displayViewRound;return s}
+function displayFor(g,r=g.displayViewRound){if(r===g.round){const practice=g.phase==='practice';return{...full(g),responses:practice?{...g.practiceResponses}:{...g.responses},eligiblePlayers:practice?[...ALL]:[...g.eligiblePlayers],practiceMode:practice,viewingHistory:false,currentRound:g.round}}const h=g.history.find(x=>x.round===r);if(!h)return displayFor(g,g.round);return{sessionCode:g.code,competitionName:g.competitionName,round:h.round,question:h.question,scores:{...h.scoresAfterRound},players:JSON.parse(JSON.stringify(g.players)),responses:JSON.parse(JSON.stringify(h.responses||{})),roundAwards:{...(h.roundAwards||{})},eligiblePlayers:[...(h.eligiblePlayers||ALL)],paperStyle:h.paperStyle||'white',previewDuration:h.previewDuration??g.previewDuration,previewEndAt:null,timerDuration:h.timerDuration||g.timerDuration,timerEndAt:null,phase:'history',locked:true,practiceMode:false,viewingHistory:true,currentRound:g.round,displayViewRound:h.round}}
+function sendDisplay(g){io.to(room(g.code,'display')).emit('display-state',displayFor(g))}
+function emitState(g,event){io.to(room(g.code,'student')).emit(event,student(g));io.to(room(g.code,'teacher')).emit(event,full(g));sendDisplay(g)}
+function clearTimer(g){if(g.timerHandle)clearTimeout(g.timerHandle);g.timerHandle=null;g.previewEndAt=null;g.timerEndAt=null;g.finalizeGraceUntil=null}
+function endAnswer(g){if(g.phase!=='running')return;g.phase='ended';g.locked=true;g.timerEndAt=Date.now();g.finalizeGraceUntil=Date.now()+GRACE;g.timerHandle=null;emitState(g,'timer-ended')}
+function beginAnswer(g){if(g.phase!=='preview')return;g.phase='running';g.locked=false;g.previewEndAt=null;g.finalizeGraceUntil=null;g.timerEndAt=Date.now()+g.timerDuration*1000;g.timerHandle=setTimeout(()=>endAnswer(g),g.timerDuration*1000);emitState(g,'answer-started')}
+function startQuestion(g,p,a){clearTimer(g);g.practiceResponses={};g.previewDuration=p;g.timerDuration=a;g.locked=true;g.displayViewRound=g.round;g.phase='preview';if(p<=0)return beginAnswer(g);g.previewEndAt=Date.now()+p*1000;g.timerHandle=setTimeout(()=>beginAnswer(g),p*1000);emitState(g,'preview-started')}
+function restartAnswer(g,s){clearTimer(g);g.timerDuration=s;g.phase='running';g.locked=false;g.timerEndAt=Date.now()+s*1000;g.timerHandle=setTimeout(()=>endAnswer(g),s*1000);g.displayViewRound=g.round;emitState(g,'answer-started')}
+function archive(g){if(g.phase==='waiting'&&!g.question&&!Object.keys(g.responses).length)return;const snap={round:g.round,question:g.question,responses:JSON.parse(JSON.stringify(g.responses)),roundAwards:{...g.roundAwards},scoresAfterRound:{...g.scores},eligiblePlayers:[...g.eligiblePlayers],paperStyle:g.paperStyle,previewDuration:g.previewDuration,timerDuration:g.timerDuration,endedAt:Date.now()};const i=g.history.findIndex(h=>h.round===g.round);if(i>=0)g.history[i]=snap;else g.history.push(snap);if(g.history.length>100)g.history.shift()}
+function validStrokes(strokes,w,h,empty=false){if(!Array.isArray(strokes)||(!empty&&!strokes.length)||strokes.length>120)return false;let total=0;for(const st of strokes){if(!Array.isArray(st)||!st.length||st.length>2500)return false;total+=st.length;if(total>20000)return false;for(const p of st)if(!p||!Number.isFinite(p.x)||!Number.isFinite(p.y)||p.x<0||p.y<0||p.x>w||p.y>h)return false}return true}
+function updateActive(g){const set=new Set();for(const v of socketPlayers.values())if(v.code===g.code&&validPlayer(v.player))set.add(v.player);g.activePlayers=[...set].sort((a,b)=>a-b);io.to(room(g.code,'student')).emit('active-players',g.activePlayers);io.to(room(g.code,'teacher')).emit('active-players',g.activePlayers)}
+function publish(g,p,response){if(response)g.responses[p]=response;else delete g.responses[p];io.to(room(g.code,'teacher')).emit('answer-updated',{player:p,response});if(g.displayViewRound===g.round)io.to(room(g.code,'display')).emit('answer-updated',{player:p,response})}
+function hasAward(g,p){return Object.prototype.hasOwnProperty.call(g.roundAwards,p)}
+function award(g,p,d){if(!validPlayer(p)||!g.eligiblePlayers.includes(p)||hasAward(g,p))return false;const old=g.scores[p]||0;g.scores[p]=Math.max(0,old+d);g.roundAwards[p]=d;const payload={player:p,score:g.scores[p],delta:g.scores[p]-old,awardDelta:d,animate:true};io.to(room(g.code,'teacher')).emit('score-updated',payload);if(g.displayViewRound===g.round)io.to(room(g.code,'display')).emit('score-updated',payload);return true}
+function clearAward(g,p){if(!validPlayer(p)||!hasAward(g,p))return;const d=Number(g.roundAwards[p])||0,old=g.scores[p]||0;g.scores[p]=Math.max(0,old-d);delete g.roundAwards[p];io.to(room(g.code,'teacher')).emit('award-cleared',{player:p,score:g.scores[p]});if(g.displayViewRound===g.round&&g.scores[p]!==old)io.to(room(g.code,'display')).emit('score-updated',{player:p,score:g.scores[p],delta:g.scores[p]-old,animate:false})}
+function joinSession(socket,code,type){code=String(code||'').trim();const g=games.get(code);if(!g){socket.emit('session-result',{ok:false,reason:'not_found'});return null}if(socket.data.sessionCode)socket.leave(room(socket.data.sessionCode,type));socket.data.sessionCode=code;socket.join(room(code,type));socket.emit('session-result',{ok:true,sessionCode:code,competitionName:g.competitionName});if(type==='display')socket.emit('display-state',displayFor(g));else socket.emit('game-state',type==='student'?student(g):full(g));return g}
+io.on('connection',socket=>{const type=String(socket.handshake.query.type||'unknown');socket.data.clientType=type;
+ socket.on('teacher-auth',data=>{if(type!=='teacher')return;if(String(data?.password||'')!==TEACHER_PASSWORD)return socket.emit('teacher-auth-result',{ok:false,reason:'bad_password'});let code=String(data?.sessionCode||'').trim(),g=code?games.get(code):null;if(code&&!g)return socket.emit('teacher-auth-result',{ok:false,reason:'not_found'});if(!g){code=newCode();g=makeGame(code);games.set(code,g)}socket.data.teacherAuthed=true;socket.data.sessionCode=code;socket.join(room(code,'teacher'));socket.emit('teacher-auth-result',{ok:true,sessionCode:code,state:full(g)})});
+ socket.on('join-session',data=>{if(!['student','display'].includes(type))return;joinSession(socket,data?.sessionCode,type)});
+ socket.on('state-request',()=>{const g=gameOf(socket);if(!g)return;if(type==='teacher'&&!socket.data.teacherAuthed)return;if(type==='display')socket.emit('display-state',displayFor(g));else socket.emit('game-state',type==='student'?student(g):full(g))});
+ socket.on('new-signature',data=>{if(!data||!Array.isArray(data.strokes)||!data.strokes.length)return;signatureCount++;socket.broadcast.emit('new-signature',data)});
+ socket.on('player-select',data=>{const g=gameOf(socket);if(type!=='student'||!g)return;const p=Number(data?.player);if(!validPlayer(p))return;const occupied=[...socketPlayers.entries()].some(([id,v])=>id!==socket.id&&v.code===g.code&&v.player===p);if(occupied)return socket.emit('player-select-result',{ok:false,player:p,reason:'occupied'});const profile=cleanProfile(data);if(!profile.className||!profile.seatNo||!profile.name)return socket.emit('player-select-result',{ok:false,player:p,reason:'profile_required'});g.players[p]={player:p,...profile};socketPlayers.set(socket.id,{code:g.code,player:p});updateActive(g);emitState(g,'player-profile-changed');socket.emit('player-select-result',{ok:true,player:p,profile:g.players[p]})});
+ socket.on('submit-answer',data=>{const g=gameOf(socket),sp=socketPlayers.get(socket.id);if(type!=='student'||!g||!sp)return;const p=Number(data?.player),w=Number(data?.width),h=Number(data?.height),auto=data?.autoFinal===true,r=Number(data?.round);if(sp.code!==g.code||sp.player!==p||!validPlayer(p)||!Number.isFinite(w)||!Number.isFinite(h)||w<=0||h<=0||w>5000||h>5000||!validStrokes(data?.strokes,w,h,auto))return;if(g.phase==='practice'){if(!data.strokes.length)return;const response={player:p,round:g.round,strokes:data.strokes,width:w,height:h,submittedAt:Date.now()};g.practiceResponses[p]=response;io.to(room(g.code,'teacher')).emit('practice-answer-updated',{player:p,response});io.to(room(g.code,'display')).emit('answer-updated',{player:p,response});return socket.emit('submit-result',{ok:true,practice:true})}if(!g.eligiblePlayers.includes(p))return socket.emit('submit-result',{ok:false,reason:'eliminated'});if(r!==g.round)return;const now=Date.now();if(g.phase==='running'&&g.timerEndAt&&now>=g.timerEndAt)endAnswer(g);const normal=g.phase==='running'&&g.timerEndAt&&now<g.timerEndAt,final=g.phase==='ended'&&auto&&g.finalizeGraceUntil&&now<=g.finalizeGraceUntil;if(!normal&&!final)return socket.emit('submit-result',{ok:false,reason:g.phase==='ended'?'locked':'not_started'});if(auto&&!data.strokes.length){publish(g,p,null);return socket.emit('submit-result',{ok:true,autoFinal:true,blank:true})}publish(g,p,{player:p,round:g.round,strokes:data.strokes,width:w,height:h,submittedAt:now,autoFinal:auto});socket.emit('submit-result',{ok:true,autoFinal:auto})});
+ const T=(event,fn)=>socket.on(event,data=>{const g=teacherGame(socket);if(g)fn(g,data)});
+ T('teacher-start-practice',g=>{clearTimer(g);g.phase='practice';g.locked=false;g.question='';g.practiceResponses={};g.displayViewRound=g.round;emitState(g,'practice-started')});T('teacher-end-practice',g=>{clearTimer(g);g.phase='waiting';g.locked=true;g.practiceResponses={};emitState(g,'practice-ended')});
+ T('teacher-set-competition-name',(g,d)=>{if(!['waiting','practice'].includes(g.phase))return socket.emit('competition-name-result',{ok:false,reason:'round_active'});const n=String(d?.name||'').trim().slice(0,80);if(!n)return socket.emit('competition-name-result',{ok:false,reason:'empty'});g.competitionName=n;emitState(g,'competition-name-changed');socket.emit('competition-name-result',{ok:true,name:n})});
+ T('teacher-update-player',(g,d)=>{const p=Number(d?.player);if(!validPlayer(p))return;const profile=cleanProfile(d);if(!profile.className||!profile.seatNo||!profile.name)return;g.players[p]={player:p,...profile};emitState(g,'player-profile-changed')});
+ T('teacher-set-eligible-players',(g,d)=>{if(!['waiting','practice'].includes(g.phase))return socket.emit('participants-result',{ok:false,reason:'round_active'});const ps=[...new Set((Array.isArray(d?.players)?d.players:[]).map(Number).filter(validPlayer))].sort((a,b)=>a-b);if(!ps.length)return socket.emit('participants-result',{ok:false,reason:'empty'});g.eligiblePlayers=ps;emitState(g,'participants-changed');socket.emit('participants-result',{ok:true,count:ps.length})});
+ T('teacher-set-paper-style',(g,d)=>{const s=String(d?.style||'white');if(PAPERS.has(s)){g.paperStyle=s;emitState(g,'paper-style-changed')}});
+ T('teacher-set-question',(g,d)=>{if(g.phase!=='waiting')return socket.emit('question-result',{ok:false,reason:'not_waiting'});const p=Math.round(Number(d?.previewSeconds??g.previewDuration)),a=Math.round(Number(d?.answerSeconds??g.timerDuration));if(!Number.isFinite(p)||p<0||p>30||!Number.isFinite(a)||a<5||a>300)return;g.question=String(d?.question||'').slice(0,200);startQuestion(g,p,a);socket.emit('question-result',{ok:true})});
+ T('teacher-start-timer',(g,d)=>{const s=Math.round(Number(d?.seconds));if(Number.isFinite(s)&&s>=5&&s<=300)restartAnswer(g,s)});
+ T('teacher-score',(g,d)=>{const p=Number(d?.player),delta=Number(d?.delta);if(!validPlayer(p)||!Number.isFinite(delta)||Math.abs(delta)>10)return;if(!g.responses[p])return socket.emit('score-result',{ok:false,player:p,reason:'not_submitted'});if(!award(g,p,delta))return socket.emit('score-result',{ok:false,player:p,reason:'already_scored'});socket.emit('score-result',{ok:true,player:p})});
+ T('teacher-score-all-submitted',g=>{let count=0;for(const p of ALL)if(g.eligiblePlayers.includes(p)&&g.responses[p]&&!hasAward(g,p)&&award(g,p,1))count++;socket.emit('bulk-score-result',{ok:true,count})});T('teacher-clear-award',(g,d)=>clearAward(g,Number(d?.player)));
+ T('teacher-view-round',(g,d)=>{const r=Number(d?.round);if(r!==g.round&&!g.history.some(h=>h.round===r))return;g.displayViewRound=r;io.to(room(g.code,'teacher')).emit('display-view-changed',full(g));sendDisplay(g)});
+ T('teacher-next-round',g=>{archive(g);clearTimer(g);g.round++;g.question='';g.responses={};g.roundAwards={};g.phase='waiting';g.locked=true;g.displayViewRound=g.round;emitState(g,'round-changed')});
+ T('teacher-reset-all',g=>{clearTimer(g);g.round=1;g.question='';g.responses={};g.practiceResponses={};g.roundAwards={};g.history=[];g.eligiblePlayers=[...ALL];g.phase='waiting';g.locked=true;g.displayViewRound=1;for(const p of ALL)g.scores[p]=0;emitState(g,'reset-all')});
+ socket.on('disconnect',()=>{const sp=socketPlayers.get(socket.id);socketPlayers.delete(socket.id);if(sp){const g=games.get(sp.code);if(g)updateActive(g)}})
 });
-
-const PORT = process.env.PORT || 3000;
-
-// 只公開 public 資料夾，路徑一樣加上 /signwall 前綴，避免 server.js / package.json 這些原始碼檔案被外部直接下載
-app.use(BASE_PATH, express.static(path.join(__dirname, 'public')));
-
-let signatureCount = 0;
-
-function isValidSignaturePayload(data) {
-  return (
-    data &&
-    typeof data.id !== 'undefined' &&
-    Array.isArray(data.strokes) &&
-    data.strokes.length > 0 &&
-    data.strokes.every(
-      (stroke) =>
-        Array.isArray(stroke) &&
-        stroke.every(
-          (p) => p && typeof p.x === 'number' && typeof p.y === 'number'
-        )
-    )
-  );
-}
-
-io.on('connection', (socket) => {
-  const clientType = socket.handshake.query.type || 'unknown';
-  console.log(`[連線] ${socket.id} (${clientType})`);
-
-  socket.on('new-signature', (data) => {
-    if (!isValidSignaturePayload(data)) {
-      console.warn(`[忽略] ${socket.id} 傳來格式不正確的簽名資料`);
-      return;
-    }
-
-    signatureCount++;
-    console.log(`[簽名] #${signatureCount} id=${data.id} 筆畫=${data.strokes.length}`);
-    socket.broadcast.emit('new-signature', data);
-  });
-
-  socket.on('disconnect', () => {
-    console.log(`[斷線] ${socket.id}`);
-  });
-});
-
-server.listen(PORT, () => {
-  console.log(`伺服器啟動：http://0.0.0.0:${PORT}${BASE_PATH}`);
-  console.log(`  sign.html → http://localhost:${PORT}${BASE_PATH}/sign.html`);
-  console.log(`  wall.html → http://localhost:${PORT}${BASE_PATH}/wall.html`);
-});
+server.listen(PORT,()=>console.log(`SignWall + competition listening on ${PORT}`));

@@ -1,63 +1,109 @@
-# 互動簽名牆 SignWall
+# 英語手寫競賽｜獨立 NAS 專案
 
-一個以 Node.js + Socket.IO 製作的即時互動簽名牆。
+此分支是由 SignWall 衍生出的校內英語手寫競賽系統，設計成可在 Synology NAS 上以**獨立 Container Manager Project**部署，不需要取代原本的 SignWall。
 
-- `sign.html`：iPad / 手機 / 觸控裝置簽名端
-- `wall.html`：投影機或大型顯示器的簽名牆
-- `server.js`：Express + Socket.IO 即時傳送服務
-- `Dockerfile` / `docker-compose.yml`：可直接以 Docker 部署
-- `docs/index.html`：GitHub Pages 可玩的單機互動 Demo
-
-## 版本分支
-
-- `main`：標準即時版；不保存歷史簽名，顯示牆使用 PixiJS + GSAP CDN。
-- `offline`：現場執行不需要 Internet；顯示牆使用原生 Canvas 2D，校內 LAN 即可運作。
-- `database`：SQLite 持久化版；可在重啟後恢復簽名，並提供 JSON 匯出。
-
-## GitHub Pages Demo
-
-`docs/index.html` 是純靜態展示版，可在同一頁左邊簽名、右邊看簽名飛入顯示牆。
-
-GitHub Pages 請設定：
-
-1. Repository → Settings → Pages
-2. Build and deployment → Deploy from a branch
-3. Branch 選 `main`
-4. Folder 選 `/docs`
-
-啟用後網址預期為：
+## 建議 NAS 架構
 
 ```text
-https://sc1137git.github.io/signwall/
+/volume1/docker/signwall
+└─ 原本簽名板（3000）
+
+/volume1/docker/english-competition
+└─ 英語手寫競賽（3001）
 ```
 
-> Pages Demo 不執行 Node.js / Socket.IO，所以是單機互動展示，不是正式的多 iPad 跨裝置同步版本。
+目前 `docker-compose.yml` 已使用：
 
-## 本機執行
+- Project：`english-competition`
+- Container：`english-competition`
+- NAS 對外 port：`3001`
+- Container 內部 port：`3000`
+- `./data:/app/data` 預留作為之後 SQLite 持久化資料目錄
+
+因此原本的 SignWall 可繼續使用 3000，不會互相衝突。
+
+## 目前功能
+
+- 多場次：每場使用獨立 4 位數場次碼，題目、分數、學生連線與筆跡互相隔離。
+- 老師控制台需先輸入老師密碼。
+- 學生加入場次後填寫班級、座號、姓名，再選競賽編號 1–12。
+- 老師端可看到並修改選手資料。
+- 老師可自選本輪晉級／作答選手，不必固定每輪都是 12 人。
+- 看題倒數＋作答倒數，時間到自動收卷。
+- 英文四線、中文田字格、全白底紙。
+- 投影依目前參賽人數自動調整格數。
+- 每題筆跡以 stroke 座標保存於目前伺服器記憶體並可回看。
+
+> 注意：目前場次與歷史仍是記憶體資料，Container 重啟後會清空。`data` 目錄已預留，下一階段會接 SQLite。
+
+## NAS 網址
+
+假設 NAS IP 是 `192.168.1.50`：
+
+```text
+學生：http://192.168.1.50:3001/signwall/student.html
+老師：http://192.168.1.50:3001/signwall/teacher.html
+投影：http://192.168.1.50:3001/signwall/competition.html
+```
+
+不要把 `localhost` 做成 iPad QR Code；`localhost` 對 iPad 代表 iPad 自己。
+
+## 環境變數
+
+第一次部署時：
 
 ```bash
-npm install
-npm start
+cp .env.example .env
 ```
 
-開啟：
+然後修改 `.env`：
 
-- 簽名端：`http://localhost:3000/sign.html`
-- 顯示牆：`http://localhost:3000/wall.html`
-- 健康檢查：`http://localhost:3000/health`
+```text
+TEACHER_PASSWORD=你要設定的正式老師密碼
+PUBLIC_BASE_URL=http://192.168.1.50:3001/signwall
+```
 
-同一個區域網路內的 iPad，請把 `localhost` 換成伺服器 / NAS 的 IP。
+`.env` 已被 `.gitignore` 排除，不要把正式密碼提交到 GitHub。
 
-## Docker Compose
+`PUBLIC_BASE_URL` 預留給投影頁產生老師／學生 QR Code。若 NAS IP 或網址固定，建議填入；若未設定，前端會以目前開啟頁面的 NAS 網址為準。
+
+## NAS 第一次建立獨立專案
+
+```bash
+cd /volume1/docker
+git clone -b english-word-competition https://github.com/sc1137git/signwall.git english-competition
+cd english-competition
+cp .env.example .env
+```
+
+編輯 `.env` 後：
 
 ```bash
 docker compose up -d --build
 ```
 
-預設對外連接埠為 `3000`。如需更換，可修改 `docker-compose.yml`。
+之後更新：
 
-## main 分支注意事項
+```bash
+cd /volume1/docker/english-competition
+git pull
+docker compose up -d --build
+```
 
-`wall.html` 使用 jsDelivr 載入 PixiJS 7 與 GSAP，因此 `main` 顯示牆瀏覽器需要能連上網際網路。若活動現場可能斷外網，請改用 `offline` 分支。
+## 技術
 
-`main` 採即時暫存設計，不使用資料庫；若需要永久保存簽名，請使用 `database` 分支。
+- Node.js / Express
+- Socket.IO
+- HTML Canvas / Pointer Events
+- Docker / Docker Compose
+
+## 下一階段
+
+目前正在往正式比賽流程擴充：
+
+- 投影首頁可建立／選擇場次
+- 建立場次必填日期、競賽名稱、參賽人數
+- 投影顯示老師 QR Code 與學生 QR Code
+- 結束／封存場次
+- 管理後台查看所有場次
+- SQLite 永久保存場次、選手、題目、筆跡與分數
