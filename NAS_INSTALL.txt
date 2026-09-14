@@ -1,0 +1,27 @@
+SignWall 簽名板｜Synology NAS 安裝
+
+建議資料夾：
+/volume1/docker/signwall
+
+Container Manager：
+1. 專案 → 新增
+2. 專案名稱：signwall
+3. 路徑選擇：/volume1/docker/signwall
+4. 使用本資料夾 docker-compose.yml 建立
+
+對外 Port：3000
+Container 名稱：signwall
+
+入口：
+http://NAS_IP:3000/signwall/
+
+簽名：
+http://NAS_IP:3000/signwall/sign.html
+
+簽名牆：
+http://NAS_IP:3000/signwall/wall.html
+
+簽名牆 v2：
+http://NAS_IP:3000/signwall/wall-v2.html
+
+這個專案與 spelling 英語競賽分離，請勿使用 3001 Port。
